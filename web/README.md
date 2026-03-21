@@ -97,6 +97,60 @@ insert into vouchers (code, max_pages) values ('TESTCODE', 999);
 
 Then on the pay page, append `?voucher=TESTCODE` to the URL.
 
+## Frontend
+
+No JavaScript framework, no build step. The UI is server-rendered [Askama](https://github.com/djc/askama) templates (Jinja2-style) with [htmx 2](https://htmx.org) loaded from CDN.
+
+htmx is used in two places:
+
+| Feature | How |
+|---|---|
+| Dashboard polling | Each in-progress job row has `hx-get="/api/jobs/:id/status" hx-trigger="every 5s" hx-swap="outerHTML"` — htmx replaces the row with fresh HTML every 5 seconds until the job reaches a terminal state |
+| Upload form | `hx-post="/api/upload" hx-encoding="multipart/form-data"` — htmx submits the form as multipart; the server responds with a redirect to `/dashboard` which htmx follows as a full page navigation |
+
+The upload form also uses `hx-indicator="#spinner"` to show a loading message while the file is uploading.
+
+Auth pages (login, signup) use the Supabase JS SDK directly (vanilla `<script>`) to call Supabase Auth from the browser and store the JWT in a cookie.
+
+## File upload flow
+
+```
+Browser                     Server                      Supabase
+   |                           |                            |
+   | POST /api/upload           |                            |
+   | (multipart/form-data)      |                            |
+   |-------------------------->|                            |
+   |                           | validate magic bytes       |
+   |                           | (PK\x03\x04 = ZIP/EPUB)   |
+   |                           |                            |
+   |                           | parse EPUB metadata        |
+   |                           | (title, word count, etc.)  |
+   |                           |                            |
+   |                           | upload raw bytes --------->|
+   |                           | (uploads/{user}/{id}.epub) |
+   |                           |                            |
+   |                           | create job row (status: uploaded)
+   |                           |                            |
+   |                           | spawn process_preview ─────── background:
+   |                           |   translate chapter 1          translate via Groq
+   |                           |   upload preview EPUB -------->|
+   |                           |   update job (preview_ready)   |
+   |                           |                            |
+   | 303 → /dashboard          |                            |
+   |<--------------------------|                            |
+   |                           |                            |
+   | GET /dashboard             |                            |
+   | (shows job as processing) |                            |
+   |                           |                            |
+   | [every 5s htmx poll]       |                            |
+   | GET /api/jobs/:id/status  |                            |
+   |-------------------------->|                            |
+   | <tr>…preview_ready…</tr>  |                            |
+   |<--------------------------|                            |
+```
+
+The 50 MB request body limit is enforced by `RequestBodyLimitLayer` in the router.
+
 ## Routes
 
 | Method | Path | Description |
