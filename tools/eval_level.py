@@ -19,31 +19,36 @@ import zipfile
 import json
 from pathlib import Path
 from collections import defaultdict
-from urllib.request import urlretrieve
+from urllib.request import urlopen
 from xml.etree import ElementTree as ET
 
 CACHE_DIR = Path.home() / ".cache" / "gunnlod" / "wordlists"
 WORDLIST_BASE = "https://raw.githubusercontent.com/ilkermeliksitki/goethe-institute-wordlist/main"
-WORDLIST_FILES = {
-    "A1": f"{WORDLIST_BASE}/A1-Wortliste.tsv",
-    "A2": f"{WORDLIST_BASE}/A2-Wortliste.tsv",
-    "B1": f"{WORDLIST_BASE}/B1-Wortliste.tsv",
-}
+LEVEL_DIRS = {"A1": "a1", "A2": "a2", "B1": "b1"}
+LETTERS = list("abcdefghijklmnoprstuvwz")
 
 
 def download_wordlists():
+    import urllib.request, json
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     lists = {}
-    for level, url in WORDLIST_FILES.items():
-        path = CACHE_DIR / f"{level}.tsv"
-        if not path.exists():
+    for level, folder in LEVEL_DIRS.items():
+        cache_file = CACHE_DIR / f"{level}.txt"
+        if not cache_file.exists():
             print(f"Downloading {level} word list...", file=sys.stderr)
-            urlretrieve(url, path)
-        words = set()
-        for line in path.read_text(encoding="utf-8").splitlines():
-            parts = line.strip().split("\t")
-            if parts:
-                words.add(parts[0].lower().strip())
+            words_all = set()
+            for letter in LETTERS:
+                url = f"{WORDLIST_BASE}/{folder}/{letter}.tsv"
+                try:
+                    with urllib.request.urlopen(url) as r:
+                        for line in r.read().decode("utf-8").splitlines():
+                            parts = line.strip().split("\t")
+                            if parts and parts[0].strip():
+                                words_all.add(parts[0].lower().strip())
+                except Exception:
+                    pass  # letter file may not exist
+            cache_file.write_text("\n".join(sorted(words_all)), encoding="utf-8")
+        words = set(cache_file.read_text(encoding="utf-8").splitlines())
         lists[level] = words
     return lists
 

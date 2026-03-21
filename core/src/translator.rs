@@ -397,11 +397,24 @@ impl Translator for OllamaTranslator {
     }
 }
 
-/// Translate all chunks sequentially using a two-pass pipeline:
-/// Pass 1: `simplifier` rewrites each chunk in the source language at the target CEFR level.
-/// Pass 2: `translator` translates the simplified text to the target language (faithful, no level constraint).
-/// Using separate translators allows different models per pass (e.g. 70b simplify, 8b translate).
-/// Retries up to 3 times per pass with backoff.
+/// Returns true if the given CEFR level benefits from the two-pass pipeline
+/// (separate simplification + translation passes). A1 and A2 require aggressive
+/// structural simplification that is best done in the source language first.
+/// B1 and above are simplified well enough in a single combined pass.
+pub fn requires_two_pass(level: &str) -> bool {
+    matches!(level, "A1" | "A2")
+}
+
+/// Translate all chunks sequentially.
+///
+/// When `two_pass` is true (recommended for A1/A2):
+///   Pass 1: `simplifier` rewrites each chunk in the source language at the target CEFR level.
+///   Pass 2: `translator` translates the simplified text to the target language faithfully.
+///
+/// When `two_pass` is false (B1 and above):
+///   Single pass: `translator` simplifies and translates in one step.
+///
+/// Retries up to 3 times per pass with exponential backoff.
 /// On rate-limit errors (429), waits 30s before retrying.
 pub async fn translate_chunks(
     simplifier: &dyn Translator,
@@ -410,87 +423,82 @@ pub async fn translate_chunks(
     source_lang: &str,
     target_lang: &str,
     level: &str,
+    two_pass: bool,
 ) -> Result<Vec<String>, TranslateError> {
     use std::io::Write;
     let total = chunks.len();
     let mut results = Vec::new();
 
     for (i, chunk) in chunks.iter().enumerate() {
-        // --- Pass 1: simplify ---
-        print!(
-            "\r  [{}/{}] chapter {} chunk {} (simplify)   ",
-            i + 1,
-            total,
-            chunk.chapter_index + 1,
-            chunk.chunk_index + 1
-        );
-        let _ = std::io::stdout().flush();
+        let translated = if two_pass {
+            // --- Pass 1: simplify in source language ---
+            print!(
+                "\r  [{}/{}] chapter {} chunk {} (simplify)   ",
+                i + 1, total, chunk.chapter_index + 1, chunk.chunk_index + 1
+            );
+            let _ = std::io::stdout().flush();
 
-        let mut last_err = None;
-        let mut simplified = String::new();
-
-        for attempt in 0..3u32 {
-            match simplifier
-                .simplify_chunk(&chunk.content, source_lang, level)
-                .await
-            {
-                Ok(t) => {
-                    simplified = t;
-                    last_err = None;
-                    break;
-                }
-                Err(e) => {
-                    let is_rate_limit = matches!(&e, TranslateError::ApiError(s) if s.starts_with("429"));
-                    let wait_secs = if is_rate_limit { 30u64 } else { 2u64.pow(attempt) };
-                    last_err = Some(e);
-                    if attempt < 2 {
-                        tokio::time::sleep(Duration::from_secs(wait_secs)).await;
+            let mut last_err = None;
+            let mut simplified = String::new();
+            for attempt in 0..3u32 {
+                match simplifier.simplify_chunk(&chunk.content, source_lang, level).await {
+                    Ok(t) => { simplified = t; last_err = None; break; }
+                    Err(e) => {
+                        let is_rate_limit = matches!(&e, TranslateError::ApiError(s) if s.starts_with("429"));
+                        let wait_secs = if is_rate_limit { 30u64 } else { 2u64.pow(attempt) };
+                        last_err = Some(e);
+                        if attempt < 2 { tokio::time::sleep(Duration::from_secs(wait_secs)).await; }
                     }
                 }
             }
-        }
+            if let Some(e) = last_err { return Err(e); }
 
-        if let Some(e) = last_err {
-            return Err(e);
-        }
+            // --- Pass 2: translate simplified text ---
+            print!(
+                "\r  [{}/{}] chapter {} chunk {} (translate)  ",
+                i + 1, total, chunk.chapter_index + 1, chunk.chunk_index + 1
+            );
+            let _ = std::io::stdout().flush();
 
-        // --- Pass 2: translate ---
-        print!(
-            "\r  [{}/{}] chapter {} chunk {} (translate)  ",
-            i + 1,
-            total,
-            chunk.chapter_index + 1,
-            chunk.chunk_index + 1
-        );
-        let _ = std::io::stdout().flush();
-
-        last_err = None;
-        let mut translated = String::new();
-
-        for attempt in 0..3u32 {
-            match translator
-                .translate_chunk(&simplified, source_lang, target_lang, "")
-                .await
-            {
-                Ok(t) => {
-                    translated = t;
-                    last_err = None;
-                    break;
-                }
-                Err(e) => {
-                    let is_rate_limit = matches!(&e, TranslateError::ApiError(s) if s.starts_with("429"));
-                    let wait_secs = if is_rate_limit { 30u64 } else { 2u64.pow(attempt) };
-                    last_err = Some(e);
-                    if attempt < 2 {
-                        tokio::time::sleep(Duration::from_secs(wait_secs)).await;
+            let mut last_err = None;
+            let mut result = String::new();
+            for attempt in 0..3u32 {
+                match translator.translate_chunk(&simplified, source_lang, target_lang, "").await {
+                    Ok(t) => { result = t; last_err = None; break; }
+                    Err(e) => {
+                        let is_rate_limit = matches!(&e, TranslateError::ApiError(s) if s.starts_with("429"));
+                        let wait_secs = if is_rate_limit { 30u64 } else { 2u64.pow(attempt) };
+                        last_err = Some(e);
+                        if attempt < 2 { tokio::time::sleep(Duration::from_secs(wait_secs)).await; }
                     }
                 }
             }
-        }
+            if let Some(e) = last_err { return Err(e); }
+            result
+        } else {
+            // --- Single pass: simplify + translate in one step ---
+            print!(
+                "\r  [{}/{}] chapter {} chunk {}   ",
+                i + 1, total, chunk.chapter_index + 1, chunk.chunk_index + 1
+            );
+            let _ = std::io::stdout().flush();
 
-        if let Some(e) = last_err {
-            return Err(e);
-        }
+            let mut last_err = None;
+            let mut result = String::new();
+            for attempt in 0..3u32 {
+                match translator.translate_chunk(&chunk.content, source_lang, target_lang, level).await {
+                    Ok(t) => { result = t; last_err = None; break; }
+                    Err(e) => {
+                        let is_rate_limit = matches!(&e, TranslateError::ApiError(s) if s.starts_with("429"));
+                        let wait_secs = if is_rate_limit { 30u64 } else { 2u64.pow(attempt) };
+                        last_err = Some(e);
+                        if attempt < 2 { tokio::time::sleep(Duration::from_secs(wait_secs)).await; }
+                    }
+                }
+            }
+            if let Some(e) = last_err { return Err(e); }
+            result
+        };
 
         results.push(translated);
     }
@@ -584,7 +592,7 @@ mod tests {
     #[tokio::test]
     async fn translate_chunks_empty_input() {
         let translator = MockTranslator::new(vec![]);
-        let result = translate_chunks(&translator, &translator, &[], "en", "de", "A2").await;
+        let result = translate_chunks(&translator, &translator, &[], "en", "de", "A2", false).await;
         assert!(matches!(result, Ok(v) if v.is_empty()));
     }
 
@@ -603,7 +611,7 @@ mod tests {
             chunk_index: 0,
             content: "text".into(),
         }];
-        let result = translate_chunks(&translator, &translator, &chunks, "en", "de", "A2").await;
+        let result = translate_chunks(&translator, &translator, &chunks, "en", "de", "A2", false).await;
         assert!(result.is_err());
     }
 
@@ -629,7 +637,7 @@ mod tests {
                 content: "second".into(),
             },
         ];
-        let result = translate_chunks(&translator, &translator, &chunks, "en", "de", "A2")
+        let result = translate_chunks(&translator, &translator, &chunks, "en", "de", "A1", true)
             .await
             .unwrap();
         assert_eq!(result.len(), 2);

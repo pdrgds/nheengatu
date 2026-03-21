@@ -1,16 +1,13 @@
 #!/bin/bash
-# Prompt × model × level test matrix for gunnlod.
-# Local (Ollama) and remote (Groq) runs execute in parallel.
+# Two-pass test matrix for gunnlod — all runs via Groq.
+#
+# Combos tested:
+#   70b_70b  — simplify=llama-3.3-70b  translate=llama-3.3-70b
+#   8b_8b    — simplify=llama-3.1-8b   translate=llama-3.1-8b
+#   70b_8b   — simplify=llama-3.3-70b  translate=llama-3.1-8b
 #
 # Usage:
 #   ./tools/run_tests.sh <input.epub> <chapter> <target_lang>
-#
-# Example:
-#   ./tools/run_tests.sh book.epub 1 pt
-#
-# Requires:
-#   - Ollama running with llama3.1:8b
-#   - GROQ_API_KEY in env or .env file (for cloud runs)
 
 set -e
 
@@ -21,112 +18,101 @@ OUT_DIR="/tmp/gunnlod_tests/$(basename "$INPUT" .epub)_ch${CHAPTER}_${LANG}"
 
 mkdir -p "$OUT_DIR"
 
-CLI="cargo run -p gunnlod-cli --release --"
+BIN="./target/release/gunnlod-cli"
 
 # Load .env if present
 if [ -f .env ]; then
     set -a; source .env; set +a
 fi
 
+if [ -z "$GROQ_API_KEY" ]; then
+    echo "Error: GROQ_API_KEY not set. Add it to .env or export it."
+    exit 1
+fi
+
 LEVELS=("A1" "A2")
 
-HAS_BIG_LOCAL=false
-ollama list 2>/dev/null | grep -q "llama3.3:70b" && HAS_BIG_LOCAL=true
-
-# Model combos: "label simplify_model translate_model"
-# label becomes part of output filename: A1_<label>.epub
-COMBOS=()
-COMBOS+=("8b_8b llama3.1:8b llama3.1:8b")
-if $HAS_BIG_LOCAL; then
-    COMBOS+=("70b_8b llama3.3:70b llama3.1:8b")
-    COMBOS+=("70b_70b llama3.3:70b llama3.3:70b")
-fi
+# "label simplify_model translate_model"
+COMBOS=(
+    "70b_70b llama-3.3-70b-versatile  llama-3.3-70b-versatile"
+    "8b_8b   llama-3.1-8b-instant     llama-3.1-8b-instant"
+    "70b_8b  llama-3.3-70b-versatile  llama-3.1-8b-instant"
+)
 
 GRAND_TOTAL=$(( ${#LEVELS[@]} * ${#COMBOS[@]} ))
 
-echo "=== gunnlod test matrix (two-pass, all local) ==="
-echo "Input   : $INPUT  (chapter $CHAPTER, lang $LANG)"
-echo "Levels  : ${LEVELS[*]}"
-echo "Combos  : ${#COMBOS[@]}  (70b local: $($HAS_BIG_LOCAL && echo yes || echo "no — only 8b+8b"))"
+echo "=== gunnlod test matrix (two-pass, all Groq) ==="
+echo "Input  : $INPUT  (chapter $CHAPTER, lang $LANG)"
+echo "Levels : ${LEVELS[*]}"
+echo ""
+printf "  %-12s %-30s %s\n" "label" "simplify" "translate"
 for c in "${COMBOS[@]}"; do
     read -r lbl sm tm <<< "$c"
-    echo "           $lbl  → simplify=$sm  translate=$tm"
+    printf "  %-12s %-30s %s\n" "$lbl" "$sm" "$tm"
 done
-echo "Total   : $GRAND_TOTAL runs"
-echo "Output  : $OUT_DIR"
+echo ""
+echo "Total  : $GRAND_TOTAL runs"
+echo "Output : $OUT_DIR"
 echo ""
 
-# Temp files to collect pass/fail results from subshells
 RESULTS_FILE=$(mktemp)
 
-# Build flat run list: "level label simplify_model translate_model"
-ALL_RUNS=()
+run_one() {
+    local level="$1" lbl="$2" sm="$3" tm="$4"
+    local label="${level}_${lbl}"
+    local out="$OUT_DIR/${label}.epub"
+
+    echo "[$label] starting  (simplify=$sm → translate=$tm)"
+    set +e
+    output=$(
+        $BIN \
+            -b groq -m "$sm" --translate-model "$tm" \
+            --simplify-backend groq \
+            --prompt detailed \
+            --chapters "$CHAPTER" \
+            -i "$INPUT" -o "$out" \
+            -t "$LANG" -l "$level" 2>&1
+    )
+    status=$?
+    set -e
+
+    echo "$output" | grep -E "chunks to translate|Done:" | sed "s/^/[$label] /"
+    if [ $status -eq 0 ]; then
+        echo "[$label] -> $out"
+        echo "ok $label" >> "$RESULTS_FILE"
+    else
+        echo "[$label] FAILED"
+        echo "$output" | tail -5 | sed "s/^/[$label]   /"
+        echo "fail $label" >> "$RESULTS_FILE"
+    fi
+}
+
+# Run all combos sequentially to respect Groq rate limits
 for level in "${LEVELS[@]}"; do
     for combo in "${COMBOS[@]}"; do
         read -r lbl sm tm <<< "$combo"
-        ALL_RUNS+=("$level $lbl $sm $tm")
+        run_one "$level" "$lbl" "$sm" "$tm"
     done
 done
-
-# Run all sequentially (local Ollama can't run two models in parallel)
-run_all() {
-    local total=${#ALL_RUNS[@]}
-    local idx=0
-    for run_spec in "${ALL_RUNS[@]}"; do
-        idx=$((idx + 1))
-        read -r level lbl sm tm <<< "$run_spec"
-        label="${level}_${lbl}"
-        out="$OUT_DIR/${label}.epub"
-        echo "[$idx/$total] $label  (simplify=$sm → translate=$tm)"
-        set +e
-        output=$(
-            $CLI -b ollama \
-                -m "$sm" --translate-model "$tm" \
-                --prompt detailed \
-                --chapters "$CHAPTER" \
-                -i "$INPUT" -o "$out" \
-                -t "$LANG" -l "$level" 2>&1
-        )
-        status=$?
-        set -e
-        echo "$output" | grep -E "chunks to translate|Done:|Pass [12]"
-        if [ $status -eq 0 ]; then
-            echo "[$idx/$total] $label -> $out"
-            echo "ok $label" >> "$RESULTS_FILE"
-        else
-            echo "[$idx/$total] $label FAILED"
-            echo "$output" | tail -3
-            echo "fail $label" >> "$RESULTS_FILE"
-        fi
-    done
-}
-
-run_all
 
 # Summarise
 PASSED=()
 FAILED=()
 while IFS= read -r line; do
-    if [[ "$line" == ok* ]]; then
-        PASSED+=("${line#ok }")
-    elif [[ "$line" == fail* ]]; then
-        FAILED+=("${line#fail }")
-    fi
+    if [[ "$line" == ok* ]];   then PASSED+=("${line#ok }"); fi
+    if [[ "$line" == fail* ]]; then FAILED+=("${line#fail }"); fi
 done < "$RESULTS_FILE"
 rm -f "$RESULTS_FILE"
 
 echo ""
 echo "=== Done: ${#PASSED[@]} passed, ${#FAILED[@]} failed ==="
-
-if [ ${#PASSED[@]} -gt 0 ]; then
-    echo ""
-    echo "Output files:"
-    ls "$OUT_DIR"/*.epub 2>/dev/null
-fi
+echo ""
+echo "Output files:"
+ls "$OUT_DIR"/*.epub 2>/dev/null
 
 if [ ${#FAILED[@]} -gt 0 ]; then
     echo ""
-    echo "Failed runs:"
+    echo "Failed:"
     for f in "${FAILED[@]}"; do echo "  - $f"; done
     exit 1
 fi

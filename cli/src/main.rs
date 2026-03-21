@@ -5,7 +5,7 @@ use gunnlod_core::{
     chunker::{chunk_chapters, ChunkerConfig},
     epub_parser,
     epub_writer::{self, OutputChapter},
-    translator::{translate_chunks, GroqTranslator, OllamaTranslator, Translator},
+    translator::{requires_two_pass, translate_chunks, GroqTranslator, OllamaTranslator, Translator},
 };
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -23,8 +23,12 @@ struct Cli {
     level: String,
     #[arg(long)]
     source_lang: Option<String>,
+    /// Backend for pass 2 (translate). Also used for pass 1 if --simplify-backend is not set.
     #[arg(short, long, default_value = "groq")]
     backend: String,
+    /// Backend for pass 1 (simplify). Defaults to --backend if not set.
+    #[arg(long)]
+    simplify_backend: Option<String>,
     #[arg(long, env = "GROQ_API_KEY", default_value = "")]
     groq_api_key: String,
     #[arg(long, default_value = "http://localhost:11434")]
@@ -77,32 +81,48 @@ async fn main() -> anyhow::Result<()> {
     println!("{} chunks to translate", chunks.len());
 
     let simple_prompt = cli.prompt == "simple";
-    let (simplifier, translator): (Box<dyn Translator>, Box<dyn Translator>) = match cli.backend.as_str() {
+    let simplify_backend = cli.simplify_backend.as_deref().unwrap_or(&cli.backend).to_string();
+
+    let simplifier: Box<dyn Translator> = match simplify_backend.as_str() {
         "groq" => {
             let mut s = GroqTranslator::new(cli.groq_api_key.clone())?;
             s.simple_prompt = simple_prompt;
             if let Some(m) = cli.model.clone() { s = s.with_model(m); }
-            let mut t = GroqTranslator::new(cli.groq_api_key)?;
-            let translate_model = cli.translate_model.or(cli.model);
-            if let Some(m) = translate_model { t = t.with_model(m); }
             println!("Pass 1 (simplify) via Groq ({})...", s.model());
-            println!("Pass 2 (translate) via Groq ({})...", t.model());
-            (Box::new(s), Box::new(t))
+            Box::new(s)
         }
         "ollama" => {
-            let translate_model = cli.translate_model.or_else(|| cli.model.clone());
-            let mut s = OllamaTranslator::new(Some(cli.ollama_url.clone()), cli.model);
+            let mut s = OllamaTranslator::new(Some(cli.ollama_url.clone()), cli.model.clone());
             s.simple_prompt = simple_prompt;
-            let t = OllamaTranslator::new(Some(cli.ollama_url), translate_model);
             println!("Pass 1 (simplify) via Ollama ({})...", s.model());
+            Box::new(s)
+        }
+        other => anyhow::bail!("Unknown simplify backend: {}. Use 'groq' or 'ollama'.", other),
+    };
+
+    let translator: Box<dyn Translator> = match cli.backend.as_str() {
+        "groq" => {
+            let mut t = GroqTranslator::new(cli.groq_api_key)?;
+            let m = cli.translate_model.or(cli.model);
+            if let Some(m) = m { t = t.with_model(m); }
+            println!("Pass 2 (translate) via Groq ({})...", t.model());
+            Box::new(t)
+        }
+        "ollama" => {
+            let m = cli.translate_model.or(cli.model);
+            let t = OllamaTranslator::new(Some(cli.ollama_url), m);
             println!("Pass 2 (translate) via Ollama ({})...", t.model());
-            (Box::new(s), Box::new(t))
+            Box::new(t)
         }
         other => anyhow::bail!("Unknown backend: {}. Use 'groq' or 'ollama'.", other),
     };
 
+    let two_pass = requires_two_pass(&cli.level);
+    if two_pass {
+        println!("Pipeline: two-pass (simplify → translate) for level {}", cli.level);
+    }
     let results =
-        translate_chunks(simplifier.as_ref(), translator.as_ref(), &chunks, &source_lang, &cli.target_lang, &cli.level)
+        translate_chunks(simplifier.as_ref(), translator.as_ref(), &chunks, &source_lang, &cli.target_lang, &cli.level, two_pass)
             .await?;
 
     // Group translated chunks back by original chapter, preserving chapter titles

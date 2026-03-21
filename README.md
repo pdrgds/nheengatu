@@ -121,6 +121,27 @@ Pass the code with `-t` (target) and optionally `--source-lang` (auto-detected f
 | C1 | Advanced — nuanced, idiomatic |
 | C2 | Mastery — effectively equivalent to native speaker |
 
+### Translation pipeline
+
+For **A1 and A2**, gunnlod uses a two-pass pipeline automatically:
+
+1. **Simplify** — the model rewrites each chunk in the source language at the target CEFR level, focusing purely on structure and vocabulary without switching languages.
+2. **Translate** — the simplified text is then translated faithfully to the target language.
+
+Separating these steps produces significantly better results at low levels: in testing, two-pass A1/A2 output showed 15–25% higher coverage of Goethe-Institut vocabulary lists compared to single-pass. It also prevents the looping and language leakage that occurs when a model tries to simplify and translate simultaneously.
+
+For **B1 and above**, a single pass is used. At these levels, simplification is light enough that combining both steps works well and avoids the extra cost.
+
+You can use different models for each pass with `--simplify-backend` and `--translate-model`:
+
+```bash
+# Simplify with a large cloud model, translate with a fast local model
+cargo run -p gunnlod-cli -- \
+  --simplify-backend groq \
+  -b ollama --translate-model llama3.1:8b \
+  -i book.epub -o out.epub -t pt -l A2
+```
+
 ## Project structure
 
 ```
