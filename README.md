@@ -1,159 +1,144 @@
 # gunnlod
 
-Translate and simplify EPUB books to a target CEFR language level.
+Translate and simplify EPUB books to a target CEFR language level using an LLM.
 
-Parses the source EPUB, splits it into chunks, sends each chunk to an LLM with instructions to simplify to the requested CEFR level, and assembles the result into a new EPUB.
+Give it a German novel and ask for Portuguese at A2 — it parses the EPUB, chunks the text, instructs the model to rewrite each chunk at the right level, and produces a new EPUB ready for your Kindle.
 
-## Requirements
+---
 
-- Rust (stable)
-- [Ollama](https://ollama.com) for local inference, or a Groq API key for cloud inference
+**Want the easy way?** A hosted version is available at [gunnlod.com](https://gunnlod.com) — upload, pay, download. No Rust, no API keys, no setup.
 
-## Quick start with Ollama
+**Want to run it yourself?** Read on.
 
-1. Install Ollama and pull a model:
+---
 
-```bash
-ollama pull llama3.1:8b
-```
+## How it works
 
-2. Build the CLI:
+1. Parses the EPUB and splits chapters into chunks (~2500 words each)
+2. Sends each chunk to an LLM with CEFR-level instructions
+3. Reassembles the translated/simplified chunks into a new EPUB
 
-```bash
-cargo build -p gunnlod-cli --release
-```
+For **A1 and A2**, a two-pass pipeline runs automatically:
+- **Pass 1 — Simplify** in the source language (vocabulary and structure only)
+- **Pass 2 — Translate** the simplified text to the target language
 
-3. Translate a book:
+Separating these steps produces significantly better results at low levels — in testing, two-pass A2 output showed 15–25% higher coverage of standard vocabulary lists compared to single-pass. It also prevents the language leakage that occurs when a model tries to simplify and translate simultaneously.
 
-```bash
-cargo run -p gunnlod-cli --release -- \
-  -b ollama \
-  -i book.epub \
-  -o book-simplified.epub \
-  -t de \
-  -l A2
-```
+For **B1 and above**, a single pass is used. Forcing two passes at B1 hurts quality: Pass 1 over-simplifies sentence structure and Pass 2 cannot recover the natural flow.
 
-That simplifies `book.epub` to German at CEFR A2 level.
+## Quick start
 
-## Options
+### With Groq (recommended)
 
-```
--i, --input <INPUT>                    Input EPUB file
--o, --output <OUTPUT>                  Output EPUB file
--t, --target-lang <TARGET_LANG>        Target language (e.g. de, en, fr)
--l, --level <LEVEL>                    CEFR level (A1, A2, B1, B2, C1, C2)
-    --source-lang <SOURCE_LANG>        Source language override (auto-detected if omitted)
--b, --backend <BACKEND>                groq or ollama [default: groq]
-    --groq-api-key <GROQ_API_KEY>      Groq API key [env: GROQ_API_KEY]
-    --ollama-url <OLLAMA_URL>          Ollama base URL [default: http://localhost:11434]
--m, --model <MODEL>                    Model override (default: llama3.1:8b for Ollama, llama-3.3-70b-versatile for Groq)
-    --max-chunk-words <MAX_CHUNK_WORDS> Max words per translation chunk [default: 2500]
-    --chapters <CHAPTERS>              Only translate these chapters (1-based, comma-separated)
-```
-
-## Backends
-
-### Ollama (local)
-
-Requires Ollama running locally. Any chat model works — larger models produce better simplifications.
-
-```bash
-# Pull a model first
-ollama pull llama3.1:8b        # 8 billion parameters — good balance of speed and quality
-ollama pull llama3.3:70b       # 70 billion parameters — better quality, needs ~64 GB RAM
-
-# Run with a specific model
-cargo run -p gunnlod-cli -- -b ollama -m llama3.3:70b -i book.epub -o out.epub -t de -l B1
-```
-
-### Groq (cloud)
-
-Requires a [Groq API key](https://console.groq.com). Uses `llama-3.3-70b-versatile` by default.
+Get a free API key at [console.groq.com](https://console.groq.com).
 
 ```bash
 export GROQ_API_KEY=gsk_...
-cargo run -p gunnlod-cli -- -i book.epub -o out.epub -t de -l A2
+cargo run -p gunnlod-cli --release -- \
+  -i book.epub -o book-pt-a2.epub \
+  -t pt -l A2
 ```
 
-Note: Groq's free tier (~6K tokens/min) is too slow for full books. Upgrade to a paid tier or use Ollama.
-
-## Testing with a single chapter
-
-Use `--chapters` to translate only specific chapters (1-based). Useful for quickly checking output quality without waiting for a full book:
+### With Ollama (local, no API key)
 
 ```bash
-# Translate only chapter 1
-cargo run -p gunnlod-cli -- -b ollama -i book.epub -o out.epub -t de -l A2 --chapters 1
+ollama pull llama3.1:8b
+cargo run -p gunnlod-cli --release -- \
+  -b ollama -i book.epub -o book-pt-a2.epub \
+  -t pt -l A2
+```
 
-# Translate chapters 1 and 3
-cargo run -p gunnlod-cli -- -b ollama -i book.epub -o out.epub -t de -l A2 --chapters 1,3
+## CLI options
+
+```
+-i, --input <FILE>              Input EPUB
+-o, --output <FILE>             Output EPUB
+-t, --target-lang <LANG>        Target language code (de, pt, en, fr, es, …)
+-l, --level <LEVEL>             CEFR level: A1 A2 B1 B2 C1 C2
+    --source-lang <LANG>        Source language (auto-detected from EPUB if omitted)
+-b, --backend <BACKEND>         groq or ollama [default: groq]
+-m, --model <MODEL>             Model override
+    --simplify-backend <B>      Backend for pass 1 (simplify). Defaults to --backend
+    --translate-model <MODEL>   Model for pass 2 (translate)
+    --chapters <N,N,…>          Only translate these chapters (1-based)
+    --two-pass                  Force two-pass at any level
+    --max-chunk-words <N>       Words per chunk [default: 2500]
+    --groq-api-key <KEY>        [env: GROQ_API_KEY]
+    --ollama-url <URL>          [default: http://localhost:11434]
 ```
 
 ## Supported languages
 
-Any language the underlying model knows. Well-tested:
-
-| Code | Language |
-|------|----------|
-| de | German |
-| en | English |
-| fr | French |
-| es | Spanish |
-| pt | Portuguese |
-| it | Italian |
-| nl | Dutch |
-| pl | Polish |
-| ru | Russian |
-| ja | Japanese |
-| zh | Chinese |
-
-Pass the code with `-t` (target) and optionally `--source-lang` (auto-detected from the EPUB metadata if omitted).
+Any language the underlying model handles well. Tested: `de` `en` `fr` `es` `pt` `it` `nl` `pl` `ru` `ja` `zh`.
 
 ## CEFR levels
 
 | Level | Description |
 |-------|-------------|
-| A1 | Beginner — very simple words, present tense |
+| A1 | Beginner — very simple words, present tense only |
 | A2 | Elementary — everyday topics, basic phrases |
-| B1 | Intermediate — familiar topics, straightforward text |
-| B2 | Upper-intermediate — complex topics, detailed text |
+| B1 | Intermediate — familiar topics, clear structure |
+| B2 | Upper-intermediate — complex topics, some nuance |
 | C1 | Advanced — nuanced, idiomatic |
-| C2 | Mastery — effectively equivalent to native speaker |
+| C2 | Mastery — near-native |
 
-### Translation pipeline
+## Using the core library
 
-For **A1 and A2**, gunnlod uses a two-pass pipeline automatically:
+`gunnlod-core` exposes the full pipeline for use in your own applications:
 
-1. **Simplify** — the model rewrites each chunk in the source language at the target CEFR level, focusing purely on structure and vocabulary without switching languages.
-2. **Translate** — the simplified text is then translated faithfully to the target language.
+```rust
+use gunnlod_core::{
+    pipeline::{run_pipeline, PipelineConfig},
+    translator::GroqTranslator,
+};
+use std::sync::Arc;
 
-Separating these steps produces significantly better results at low levels: in testing, two-pass A1/A2 output showed 15–25% higher coverage of Goethe-Institut vocabulary lists compared to single-pass. It also prevents the looping and language leakage that occurs when a model tries to simplify and translate simultaneously.
+let translator = Arc::new(GroqTranslator::new(api_key)?);
+let config = PipelineConfig {
+    target_lang: "pt".into(),
+    level: "A2".into(),
+    ..Default::default()
+};
+run_pipeline(
+    Path::new("book.epub"),
+    Path::new("book-pt-a2.epub"),
+    &config,
+    translator.as_ref(),
+    translator.as_ref(),
+).await?;
+```
 
-For **B1 and above**, a single pass is used — and this is intentional, not just a cost saving. Testing shows that forcing two-pass at B1 *hurts* quality: Pass 1 aggressively breaks sentences down to A1/A2 structure, and Pass 2 cannot recover the natural flow that B1 prose requires. Single-pass with B1 instructions produces more idiomatic, naturally-flowing text.
+Implement the `Translator` trait to plug in any LLM backend:
 
-You can override the default with `--two-pass` to force two-pass at any level, but it is not recommended for B1+.
-
-You can use different models for each pass with `--simplify-backend` and `--translate-model`:
-
-```bash
-# Simplify with a large cloud model, translate with a fast local model
-cargo run -p gunnlod-cli -- \
-  --simplify-backend groq \
-  -b ollama --translate-model llama3.1:8b \
-  -i book.epub -o out.epub -t pt -l A2
+```rust
+#[async_trait]
+impl Translator for MyBackend {
+    async fn translate_chunk(&self, text: &str, source: &str, target: &str, level: &str)
+        -> Result<String, TranslateError> { … }
+}
 ```
 
 ## Project structure
 
 ```
-core/    Library crate — parsing, chunking, translation, EPUB output
-cli/     Binary crate — command-line interface
-tests/   Test fixtures (test.epub)
+core/   Library crate — EPUB parsing, chunking, translator trait, pipeline
+cli/    Binary crate — command-line interface
+tests/  Integration tests and fixtures
 ```
 
-## Testing
+The hosted service (`web/`) lives in a separate private repository.
+
+## Building and testing
 
 ```bash
+cargo build
 cargo test
 ```
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## License
+
+MIT — see [LICENSE](LICENSE).
