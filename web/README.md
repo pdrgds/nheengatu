@@ -112,44 +112,7 @@ The upload form also uses `hx-indicator="#spinner"` to show a loading message wh
 
 Auth pages (login, signup) use the Supabase JS SDK directly (vanilla `<script>`) to call Supabase Auth from the browser and store the JWT in a cookie.
 
-## File upload flow
-
-```
-Browser                     Server                      Supabase
-   |                           |                            |
-   | POST /api/upload           |                            |
-   | (multipart/form-data)      |                            |
-   |-------------------------->|                            |
-   |                           | validate magic bytes       |
-   |                           | (PK\x03\x04 = ZIP/EPUB)   |
-   |                           |                            |
-   |                           | parse EPUB metadata        |
-   |                           | (title, word count, etc.)  |
-   |                           |                            |
-   |                           | upload raw bytes --------->|
-   |                           | (uploads/{user}/{id}.epub) |
-   |                           |                            |
-   |                           | create job row (status: uploaded)
-   |                           |                            |
-   |                           | spawn process_preview ─────── background:
-   |                           |   translate chapter 1          translate via Groq
-   |                           |   upload preview EPUB -------->|
-   |                           |   update job (preview_ready)   |
-   |                           |                            |
-   | 303 → /dashboard          |                            |
-   |<--------------------------|                            |
-   |                           |                            |
-   | GET /dashboard             |                            |
-   | (shows job as processing) |                            |
-   |                           |                            |
-   | [every 5s htmx poll]       |                            |
-   | GET /api/jobs/:id/status  |                            |
-   |-------------------------->|                            |
-   | <tr>…preview_ready…</tr>  |                            |
-   |<--------------------------|                            |
-```
-
-The 50 MB request body limit is enforced by `RequestBodyLimitLayer` in the router.
+See [docs/upload-flow.md](../docs/upload-flow.md) for the full upload and job lifecycle documentation.
 
 ## Routes
 
