@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block content %}
+<div style="max-width:400px; margin:3rem auto;">
+  <h2 style="margin-bottom:1.5rem;">Log in</h2>
+  <form id="login-form">
+    <label>Email
+      <input type="email" id="email" required autocomplete="email">
+    </label>
+    <label>Password
+      <input type="password" id="password" required autocomplete="current-password">
+    </label>
+    <div id="error-msg" style="color:#c00; font-size:.9rem; margin-top:.5rem; display:none;"></div>
+    <button type="submit" class="btn" style="margin-top:1.25rem; width:100%;">Log in</button>
+  </form>
+  <p style="text-align:center; margin-top:1rem; font-size:.9rem;">
+    Don't have an account? <a href="/signup">Sign up</a>
+  </p>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+  const { createClient } = supabase;
+  const sb = createClient('{{ supabase_url }}', '{{ supabase_anon_key }}');
+
+  document.getElementById('login-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const email = document.getElementById('email').value;
+    const password = document.getElementById('password').value;
+    const { data, error } = await sb.auth.signInWithPassword({ email, password });
+    if (error) {
+      const el = document.getElementById('error-msg');
+      el.textContent = error.message;
+      el.style.display = 'block';
+      return;
+    }
+    document.cookie = `sb-token=${data.session.access_token}; path=/; SameSite=Lax`;
+    window.location.href = '/dashboard';
+  });
+</script>
+{% endblock %}

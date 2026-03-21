@@ -57,8 +57,8 @@ pub async fn run_pipeline(
     input: &Path,
     output: &Path,
     config: &PipelineConfig,
-    simplifier: &dyn Translator,
-    translator: &dyn Translator,
+    simplifier: &(dyn Translator + Send + Sync),
+    translator: &(dyn Translator + Send + Sync),
 ) -> Result<(), PipelineError> {
     let book = epub_parser::parse_epub(input)?;
 
