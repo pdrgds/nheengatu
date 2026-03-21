@@ -71,12 +71,64 @@ impl GroqTranslator {
             })
             .unwrap_or_default();
 
+        let level_instructions = match level {
+            "A1" => concat!(
+                "You are writing for a complete beginner. Simplify the story aggressively.\n",
+                "Rules:\n",
+                "- One idea per sentence. Maximum 8 words per sentence.\n",
+                "- Only present tense and simple past (he went, she said).\n",
+                "- No subordinate clauses, no relative clauses, no complex grammar.\n",
+                "- Replace every difficult word with the simplest possible word.\n",
+                "- If a scene is complex, reduce it to the main action only.\n",
+                "- It is OK to lose detail. Clarity is more important than completeness.\n",
+                "\n",
+                "Style example (apply this to the target language):\n",
+                "WRONG: \"Despite his miserable living conditions, Harry maintained a resilient spirit.\"\n",
+                "RIGHT: \"Harry was sad. But he did not give up.\"\n",
+                "\n",
+                "WRONG: \"The letter, which had arrived mysteriously, contained an extraordinary invitation.\"\n",
+                "RIGHT: \"A letter came. It had an invitation. Harry was surprised.\"\n",
+            ),
+            "A2" => concat!(
+                "You are writing for an elementary learner. Simplify language and sentence structure.\n",
+                "Rules:\n",
+                "- Short, clear sentences (under 15 words). Two ideas per sentence at most.\n",
+                "- Use everyday vocabulary. Replace rare or formal words with common ones.\n",
+                "- Simple past and present tense. Basic connectors only: and, but, because, so, then.\n",
+                "- Keep the full story but simplify how it is told. You can drop small details.\n",
+                "\n",
+                "Style example (apply this to the target language):\n",
+                "WRONG: \"He resided with his relatives, who harboured a profound aversion towards him.\"\n",
+                "RIGHT: \"He lived with his aunt and uncle. They did not like him very much.\"\n",
+                "\n",
+                "WRONG: \"The magnificent owl descended gracefully, bearing a sealed parchment.\"\n",
+                "RIGHT: \"An owl flew down. It had a letter.\"\n",
+            ),
+            "B1" => concat!(
+                "You are writing for an intermediate learner.\n",
+                "Rules:\n",
+                "- Use clear, natural language. Sentences can be moderate length.\n",
+                "- Avoid rare words, idioms, and overly complex structures.\n",
+                "- Keep the full story and most details. Simplify only where needed.\n",
+            ),
+            "B2" => concat!(
+                "You are writing for an upper-intermediate learner.\n",
+                "Rules:\n",
+                "- Preserve the original style and narrative closely.\n",
+                "- Simplify only unusually complex sentences and rare vocabulary.\n",
+                "- Replace C1/C2 words with B2-level equivalents where possible.\n",
+            ),
+            _ => "Translate faithfully, preserving the original style and vocabulary.\n",
+        };
+
         format!(
             "{}Translate the following text from {} to {}.\n\
-             Simplify it to CEFR level {}. Use only grammar and vocabulary appropriate for {}.\n\
-             Keep the meaning and tone of the original. Do not add explanations or notes.\n\
-             Output only the translated and simplified text.\n\nText:\n{}",
-            context_block, source_lang, target_lang, level, level, text
+             Target level: CEFR {}.\n\n\
+             {}\n\
+             Do NOT include any introduction, explanation, or commentary.\n\
+             Do NOT write sentences like \"Here is the translation\" or \"Here is the simplified text\".\n\
+             Output ONLY the translated and simplified text, nothing else.\n\nText:\n{}",
+            context_block, source_lang, target_lang, level, level_instructions, text
         )
     }
 }
