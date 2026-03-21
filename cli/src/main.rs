@@ -1,4 +1,5 @@
 use clap::Parser;
+use dotenvy::dotenv;
 use gunnlod_core::{
     book::Book,
     chunker::{chunk_chapters, ChunkerConfig},
@@ -30,6 +31,9 @@ struct Cli {
     ollama_url: String,
     #[arg(short, long)]
     model: Option<String>,
+    /// Model for pass 2 (translate). Defaults to same as --model.
+    #[arg(long)]
+    translate_model: Option<String>,
     #[arg(long, default_value = "2500")]
     max_chunk_words: usize,
     /// Only translate these chapters (1-based, comma-separated). E.g. --chapters 1,2,5
@@ -42,6 +46,7 @@ struct Cli {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    dotenv().ok();
     let cli = Cli::parse();
 
     println!("Parsing {}...", cli.input.display());
@@ -72,27 +77,32 @@ async fn main() -> anyhow::Result<()> {
     println!("{} chunks to translate", chunks.len());
 
     let simple_prompt = cli.prompt == "simple";
-    let translator: Box<dyn Translator> = match cli.backend.as_str() {
+    let (simplifier, translator): (Box<dyn Translator>, Box<dyn Translator>) = match cli.backend.as_str() {
         "groq" => {
+            let mut s = GroqTranslator::new(cli.groq_api_key.clone())?;
+            s.simple_prompt = simple_prompt;
+            if let Some(m) = cli.model.clone() { s = s.with_model(m); }
             let mut t = GroqTranslator::new(cli.groq_api_key)?;
-            t.simple_prompt = simple_prompt;
-            if let Some(m) = cli.model {
-                t = t.with_model(m);
-            }
-            println!("Translating via Groq ({})...", t.model());
-            Box::new(t)
+            let translate_model = cli.translate_model.or(cli.model);
+            if let Some(m) = translate_model { t = t.with_model(m); }
+            println!("Pass 1 (simplify) via Groq ({})...", s.model());
+            println!("Pass 2 (translate) via Groq ({})...", t.model());
+            (Box::new(s), Box::new(t))
         }
         "ollama" => {
-            let mut t = OllamaTranslator::new(Some(cli.ollama_url), cli.model);
-            t.simple_prompt = simple_prompt;
-            println!("Translating via Ollama ({})...", t.model());
-            Box::new(t)
+            let translate_model = cli.translate_model.or_else(|| cli.model.clone());
+            let mut s = OllamaTranslator::new(Some(cli.ollama_url.clone()), cli.model);
+            s.simple_prompt = simple_prompt;
+            let t = OllamaTranslator::new(Some(cli.ollama_url), translate_model);
+            println!("Pass 1 (simplify) via Ollama ({})...", s.model());
+            println!("Pass 2 (translate) via Ollama ({})...", t.model());
+            (Box::new(s), Box::new(t))
         }
         other => anyhow::bail!("Unknown backend: {}. Use 'groq' or 'ollama'.", other),
     };
 
     let results =
-        translate_chunks(translator.as_ref(), &chunks, &source_lang, &cli.target_lang, &cli.level)
+        translate_chunks(simplifier.as_ref(), translator.as_ref(), &chunks, &source_lang, &cli.target_lang, &cli.level)
             .await?;
 
     // Group translated chunks back by original chapter, preserving chapter titles

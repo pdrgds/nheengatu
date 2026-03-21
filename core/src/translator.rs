@@ -21,6 +21,16 @@ pub trait Translator: Send + Sync {
         target_lang: &str,
         level: &str,
     ) -> Result<String, TranslateError>;
+
+    async fn simplify_chunk(
+        &self,
+        text: &str,
+        lang: &str,
+        level: &str,
+    ) -> Result<String, TranslateError> {
+        // Default: fall back to translate_chunk with same source/target
+        self.translate_chunk(text, lang, lang, level).await
+    }
 }
 
 pub struct GroqTranslator {
@@ -143,6 +153,82 @@ impl GroqTranslator {
             context_block, source_lang, target_lang, level, level_instructions, text
         )
     }
+
+    pub fn build_simplify_prompt(
+        text: &str,
+        lang: &str,
+        level: &str,
+        simple_prompt: bool,
+    ) -> String {
+        if simple_prompt {
+            return format!(
+                "Rewrite the following text in {lang}. \
+                 Simplify it to CEFR level {level}. Keep it in {lang}. Do not translate it.\n\
+                 Output ONLY the rewritten text, nothing else.\n\nText:\n{text}"
+            );
+        }
+
+        let level_instructions = match level {
+            "A1" => concat!(
+                "You are writing for a complete beginner. Simplify the story aggressively.\n",
+                "Rules:\n",
+                "- One idea per sentence. Maximum 8 words per sentence.\n",
+                "- Only present tense and simple past (he went, she said).\n",
+                "- No subordinate clauses, no relative clauses, no complex grammar.\n",
+                "- Replace every difficult word with the simplest possible word.\n",
+                "- If a scene is complex, reduce it to the main action only.\n",
+                "- It is OK to lose detail. Clarity is more important than completeness.\n",
+                "\n",
+                "Style example (apply this to the target language):\n",
+                "WRONG: \"Despite his miserable living conditions, Harry maintained a resilient spirit.\"\n",
+                "RIGHT: \"Harry was sad. But he did not give up.\"\n",
+                "\n",
+                "WRONG: \"The letter, which had arrived mysteriously, contained an extraordinary invitation.\"\n",
+                "RIGHT: \"A letter came. It had an invitation. Harry was surprised.\"\n",
+            ),
+            "A2" => concat!(
+                "You are writing for an elementary learner. Simplify language and sentence structure.\n",
+                "Rules:\n",
+                "- Short, clear sentences (under 15 words). Two ideas per sentence at most.\n",
+                "- Use everyday vocabulary. Replace rare or formal words with common ones.\n",
+                "- Simple past and present tense. Basic connectors only: and, but, because, so, then.\n",
+                "- Keep the full story but simplify how it is told. You can drop small details.\n",
+                "\n",
+                "Style example (apply this to the target language):\n",
+                "WRONG: \"He resided with his relatives, who harboured a profound aversion towards him.\"\n",
+                "RIGHT: \"He lived with his aunt and uncle. They did not like him very much.\"\n",
+                "\n",
+                "WRONG: \"The magnificent owl descended gracefully, bearing a sealed parchment.\"\n",
+                "RIGHT: \"An owl flew down. It had a letter.\"\n",
+            ),
+            "B1" => concat!(
+                "You are writing for an intermediate learner.\n",
+                "Rules:\n",
+                "- Use clear, natural language. Sentences can be moderate length.\n",
+                "- Avoid rare words, idioms, and overly complex structures.\n",
+                "- Keep the full story and most details. Simplify only where needed.\n",
+            ),
+            "B2" => concat!(
+                "You are writing for an upper-intermediate learner.\n",
+                "Rules:\n",
+                "- Preserve the original style and narrative closely.\n",
+                "- Simplify only unusually complex sentences and rare vocabulary.\n",
+                "- Replace C1/C2 words with B2-level equivalents where possible.\n",
+            ),
+            _ => "Rewrite faithfully, preserving the original style and vocabulary.\n",
+        };
+
+        format!(
+            "Rewrite the following {lang} text at CEFR level {level}.\n\
+             Keep the text in {lang} — do NOT translate it.\n\n\
+             {level_instructions}\n\
+             Do NOT include any introduction, explanation, or commentary.\n\
+             Do NOT write sentences like \"Here is the simplified text\".\n\
+             Do NOT repeat any sentence or phrase you have already written.\n\
+             Each sentence must say something new.\n\
+             Output ONLY the rewritten {lang} text, nothing else.\n\nText:\n{text}"
+        )
+    }
 }
 
 #[async_trait]
@@ -155,6 +241,40 @@ impl Translator for GroqTranslator {
         level: &str,
     ) -> Result<String, TranslateError> {
         let prompt = Self::build_prompt(text, source_lang, target_lang, level, None, self.simple_prompt);
+
+        let resp = self
+            .client
+            .post("https://api.groq.com/openai/v1/chat/completions")
+            .header("Authorization", format!("Bearer {}", self.api_key))
+            .json(&serde_json::json!({
+                "model": self.model,
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": 0.3,
+                "max_tokens": 8192,
+            }))
+            .send()
+            .await?;
+
+        if !resp.status().is_success() {
+            let status = resp.status().as_u16();
+            let body = resp.text().await.unwrap_or_default();
+            return Err(TranslateError::ApiError(format!("{}: {}", status, body)));
+        }
+
+        let body: serde_json::Value = resp.json().await?;
+        let content = body["choices"][0]["message"]["content"]
+            .as_str()
+            .ok_or_else(|| TranslateError::ApiError("empty or null content in API response".to_string()))?;
+        Ok(content.to_string())
+    }
+
+    async fn simplify_chunk(
+        &self,
+        text: &str,
+        lang: &str,
+        level: &str,
+    ) -> Result<String, TranslateError> {
+        let prompt = Self::build_simplify_prompt(text, lang, level, self.simple_prompt);
 
         let resp = self
             .client
@@ -243,12 +363,48 @@ impl Translator for OllamaTranslator {
             .ok_or_else(|| TranslateError::ApiError("empty or null response field in Ollama response".to_string()))?;
         Ok(content.to_string())
     }
+
+    async fn simplify_chunk(
+        &self,
+        text: &str,
+        lang: &str,
+        level: &str,
+    ) -> Result<String, TranslateError> {
+        let prompt = GroqTranslator::build_simplify_prompt(text, lang, level, self.simple_prompt);
+
+        let resp = self
+            .client
+            .post(format!("{}/api/generate", self.base_url))
+            .json(&serde_json::json!({
+                "model": self.model,
+                "prompt": prompt,
+                "stream": false,
+            }))
+            .send()
+            .await?;
+
+        if !resp.status().is_success() {
+            return Err(TranslateError::ApiError(
+                resp.text().await.unwrap_or_default(),
+            ));
+        }
+
+        let body: serde_json::Value = resp.json().await?;
+        let content = body["response"]
+            .as_str()
+            .ok_or_else(|| TranslateError::ApiError("empty or null response field in Ollama response".to_string()))?;
+        Ok(content.to_string())
+    }
 }
 
-/// Translate all chunks sequentially, passing last-200-words context to each chunk
-/// for vocabulary consistency. Retries up to 3 times per chunk with backoff.
+/// Translate all chunks sequentially using a two-pass pipeline:
+/// Pass 1: `simplifier` rewrites each chunk in the source language at the target CEFR level.
+/// Pass 2: `translator` translates the simplified text to the target language (faithful, no level constraint).
+/// Using separate translators allows different models per pass (e.g. 70b simplify, 8b translate).
+/// Retries up to 3 times per pass with backoff.
 /// On rate-limit errors (429), waits 30s before retrying.
 pub async fn translate_chunks(
+    simplifier: &dyn Translator,
     translator: &dyn Translator,
     chunks: &[crate::book::Chunk],
     source_lang: &str,
@@ -258,41 +414,32 @@ pub async fn translate_chunks(
     use std::io::Write;
     let total = chunks.len();
     let mut results = Vec::new();
-    let mut prev_context: Option<String> = None;
 
     for (i, chunk) in chunks.iter().enumerate() {
-        print!("\r  [{}/{}] chapter {} chunk {}   ", i + 1, total, chunk.chapter_index + 1, chunk.chunk_index + 1);
+        // --- Pass 1: simplify ---
+        print!(
+            "\r  [{}/{}] chapter {} chunk {} (simplify)   ",
+            i + 1,
+            total,
+            chunk.chapter_index + 1,
+            chunk.chunk_index + 1
+        );
         let _ = std::io::stdout().flush();
-        // Prepend last-200-words context as plain text so the translator sees it
-        // in the "Text:" section of the prompt. Do NOT pre-assemble a full prompt
-        // here — translate_chunk does that internally.
-        // Context is embedded into the text section of the prompt (not via build_prompt's
-        // prev_context param) because the Translator trait has no context parameter.
-        // The [Vocabulary reference] header signals to the model not to translate that block.
-        let text = match &prev_context {
-            Some(ctx) => format!(
-                "[Vocabulary reference from previous section — do not translate this part]\n\
-                 {}\n\n---\n\n{}",
-                ctx, chunk.content
-            ),
-            None => chunk.content.clone(),
-        };
 
         let mut last_err = None;
-        let mut translated = String::new();
+        let mut simplified = String::new();
 
         for attempt in 0..3u32 {
-            match translator
-                .translate_chunk(&text, source_lang, target_lang, level)
+            match simplifier
+                .simplify_chunk(&chunk.content, source_lang, level)
                 .await
             {
                 Ok(t) => {
-                    translated = t;
+                    simplified = t;
                     last_err = None;
                     break;
                 }
                 Err(e) => {
-                    // Use longer backoff for rate limit errors
                     let is_rate_limit = matches!(&e, TranslateError::ApiError(s) if s.starts_with("429"));
                     let wait_secs = if is_rate_limit { 30u64 } else { 2u64.pow(attempt) };
                     last_err = Some(e);
@@ -307,10 +454,43 @@ pub async fn translate_chunks(
             return Err(e);
         }
 
-        // Extract last ~200 words as context for the next chunk
-        let words: Vec<&str> = translated.split_whitespace().collect();
-        let ctx_start = words.len().saturating_sub(200);
-        prev_context = Some(words[ctx_start..].join(" "));
+        // --- Pass 2: translate ---
+        print!(
+            "\r  [{}/{}] chapter {} chunk {} (translate)  ",
+            i + 1,
+            total,
+            chunk.chapter_index + 1,
+            chunk.chunk_index + 1
+        );
+        let _ = std::io::stdout().flush();
+
+        last_err = None;
+        let mut translated = String::new();
+
+        for attempt in 0..3u32 {
+            match translator
+                .translate_chunk(&simplified, source_lang, target_lang, "")
+                .await
+            {
+                Ok(t) => {
+                    translated = t;
+                    last_err = None;
+                    break;
+                }
+                Err(e) => {
+                    let is_rate_limit = matches!(&e, TranslateError::ApiError(s) if s.starts_with("429"));
+                    let wait_secs = if is_rate_limit { 30u64 } else { 2u64.pow(attempt) };
+                    last_err = Some(e);
+                    if attempt < 2 {
+                        tokio::time::sleep(Duration::from_secs(wait_secs)).await;
+                    }
+                }
+            }
+        }
+
+        if let Some(e) = last_err {
+            return Err(e);
+        }
 
         results.push(translated);
     }
@@ -347,6 +527,33 @@ mod tests {
     }
 
     #[test]
+    fn simplify_prompt_keeps_same_language() {
+        let p = GroqTranslator::build_simplify_prompt("Hallo Welt.", "German", "A1", false);
+        assert!(p.contains("German"));
+        assert!(p.contains("A1"));
+        assert!(p.contains("Hallo Welt."));
+        // Must instruct the model to keep the language, not translate to another language
+        assert!(p.contains("Keep the text in German") || p.contains("do NOT translate"));
+        // Must NOT instruct "Translate the following" as a primary directive
+        assert!(!p.contains("Translate the following"));
+    }
+
+    #[test]
+    fn simplify_prompt_contains_anti_repetition() {
+        let p = GroqTranslator::build_simplify_prompt("some text", "English", "A2", false);
+        assert!(p.contains("Do NOT repeat any sentence"));
+        assert!(p.contains("Each sentence must say something new"));
+    }
+
+    #[test]
+    fn simplify_prompt_simple_mode() {
+        let p = GroqTranslator::build_simplify_prompt("Bonjour.", "French", "B1", true);
+        assert!(p.contains("French"));
+        assert!(p.contains("B1"));
+        assert!(p.contains("Bonjour."));
+    }
+
+    #[test]
     fn ollama_defaults() {
         let t = OllamaTranslator::new(None, None);
         assert_eq!(t.base_url, "http://localhost:11434");
@@ -377,12 +584,15 @@ mod tests {
     #[tokio::test]
     async fn translate_chunks_empty_input() {
         let translator = MockTranslator::new(vec![]);
-        let result = translate_chunks(&translator, &[], "en", "de", "A2").await;
+        let result = translate_chunks(&translator, &translator, &[], "en", "de", "A2").await;
         assert!(matches!(result, Ok(v) if v.is_empty()));
     }
 
     #[tokio::test]
     async fn translate_chunks_propagates_error() {
+        // Two-pass: pass 1 (simplify) uses default impl -> translate_chunk,
+        // pass 2 (translate) also uses translate_chunk.
+        // We need 3 failures for pass 1 to exhaust retries.
         let translator = MockTranslator::new(vec![
             Err(TranslateError::ApiError("500: error".to_string())),
             Err(TranslateError::ApiError("500: error".to_string())),
@@ -393,15 +603,19 @@ mod tests {
             chunk_index: 0,
             content: "text".into(),
         }];
-        let result = translate_chunks(&translator, &chunks, "en", "de", "A2").await;
+        let result = translate_chunks(&translator, &translator, &chunks, "en", "de", "A2").await;
         assert!(result.is_err());
     }
 
     #[tokio::test]
     async fn translate_chunks_passes_context_to_second_chunk() {
+        // Two-pass per chunk: each chunk needs 2 successful translate_chunk calls
+        // (simplify default impl + translate pass).
         let translator = MockTranslator::new(vec![
-            Ok("translated first chunk with unique words".to_string()),
-            Ok("translated second chunk".to_string()),
+            Ok("simplified first chunk".to_string()),          // chunk 0, pass 1 (simplify)
+            Ok("translated first chunk with unique words".to_string()), // chunk 0, pass 2 (translate)
+            Ok("simplified second chunk".to_string()),         // chunk 1, pass 1 (simplify)
+            Ok("translated second chunk".to_string()),         // chunk 1, pass 2 (translate)
         ]);
         let chunks = vec![
             crate::book::Chunk {
@@ -415,7 +629,7 @@ mod tests {
                 content: "second".into(),
             },
         ];
-        let result = translate_chunks(&translator, &chunks, "en", "de", "A2")
+        let result = translate_chunks(&translator, &translator, &chunks, "en", "de", "A2")
             .await
             .unwrap();
         assert_eq!(result.len(), 2);
