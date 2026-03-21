@@ -1,6 +1,15 @@
+use std::io::Write;
 use std::path::Path;
 
 use thiserror::Error;
+
+fn escape_xml(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&apos;")
+}
 
 #[derive(Error, Debug)]
 pub enum EpubWriteError {
@@ -40,7 +49,7 @@ pub fn write_epub(
             .content
             .split("\n\n")
             .filter(|l| !l.trim().is_empty())
-            .map(|l| format!("<p>{}</p>", l))
+            .map(|l| format!("<p>{}</p>", escape_xml(l)))
             .collect::<Vec<_>>()
             .join("\n");
 
@@ -51,7 +60,7 @@ pub fn write_epub(
              <body><h1>{}</h1>\n\
              {}\n\
              </body></html>",
-            ch.title, ch.title, paras
+            escape_xml(&ch.title), escape_xml(&ch.title), paras
         );
 
         builder
@@ -65,7 +74,6 @@ pub fn write_epub(
     builder
         .generate(&mut f)
         .map_err(|e| EpubWriteError::BuildError(e.to_string()))?;
-    use std::io::Write;
     f.flush()?;
     Ok(())
 }
@@ -115,5 +123,24 @@ mod tests {
         )
         .unwrap();
         assert!(out.exists());
+    }
+
+    #[test]
+    fn escapes_special_characters_in_title_and_content() {
+        let tmp = TempDir::new().unwrap();
+        let out = tmp.path().join("special.epub");
+        write_epub(
+            "Kant & Hegel",
+            "en",
+            &[OutputChapter {
+                title: "x < y".into(),
+                content: "A & B are \"friends\".".into(),
+            }],
+            &out,
+        )
+        .unwrap();
+        assert!(out.exists());
+        let f = std::fs::File::open(&out).unwrap();
+        assert!(zip::ZipArchive::new(f).is_ok());
     }
 }
