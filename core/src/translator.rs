@@ -189,10 +189,14 @@ pub async fn translate_chunks(
     target_lang: &str,
     level: &str,
 ) -> Result<Vec<String>, TranslateError> {
+    use std::io::Write;
+    let total = chunks.len();
     let mut results = Vec::new();
     let mut prev_context: Option<String> = None;
 
-    for chunk in chunks.iter() {
+    for (i, chunk) in chunks.iter().enumerate() {
+        print!("\r  [{}/{}] chapter {} chunk {}   ", i + 1, total, chunk.chapter_index + 1, chunk.chunk_index + 1);
+        let _ = std::io::stdout().flush();
         // Prepend last-200-words context as plain text so the translator sees it
         // in the "Text:" section of the prompt. Do NOT pre-assemble a full prompt
         // here — translate_chunk does that internally.
@@ -244,6 +248,7 @@ pub async fn translate_chunks(
 
         results.push(translated);
     }
+    println!();
     Ok(results)
 }
 

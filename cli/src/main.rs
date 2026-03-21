@@ -32,6 +32,9 @@ struct Cli {
     model: Option<String>,
     #[arg(long, default_value = "2500")]
     max_chunk_words: usize,
+    /// Only translate these chapters (1-based, comma-separated). E.g. --chapters 1,2,5
+    #[arg(long, value_delimiter = ',')]
+    chapters: Vec<usize>,
 }
 
 #[tokio::main]
@@ -50,10 +53,19 @@ async fn main() -> anyhow::Result<()> {
         book.metadata.title, book.metadata.word_count, book.metadata.chapter_count, source_lang
     );
 
-    let config = ChunkerConfig {
-        max_words_per_chunk: cli.max_chunk_words,
+    let selected: Vec<_> = if cli.chapters.is_empty() {
+        book.chapters.iter().collect()
+    } else {
+        cli.chapters.iter().filter_map(|&n| book.chapters.get(n - 1)).collect()
     };
-    let chunks = chunk_chapters(&book.chapters, &config);
+    if selected.is_empty() {
+        anyhow::bail!("No chapters matched --chapters selection (book has {} chapters)", book.metadata.chapter_count);
+    }
+    println!("Translating {}/{} chapters", selected.len(), book.metadata.chapter_count);
+
+    let config = ChunkerConfig { max_words_per_chunk: cli.max_chunk_words };
+    let selected_owned: Vec<_> = selected.iter().map(|c| (*c).clone()).collect();
+    let chunks = chunk_chapters(&selected_owned, &config);
     println!("{} chunks to translate", chunks.len());
 
     let translator: Box<dyn Translator> = match cli.backend.as_str() {
