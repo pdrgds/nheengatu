@@ -112,10 +112,10 @@ impl Translator for GroqTranslator {
         }
 
         let body: serde_json::Value = resp.json().await?;
-        Ok(body["choices"][0]["message"]["content"]
+        let content = body["choices"][0]["message"]["content"]
             .as_str()
-            .unwrap_or("")
-            .to_string())
+            .ok_or_else(|| TranslateError::ApiError("empty or null content in API response".to_string()))?;
+        Ok(content.to_string())
     }
 }
 
@@ -172,7 +172,10 @@ impl Translator for OllamaTranslator {
         }
 
         let body: serde_json::Value = resp.json().await?;
-        Ok(body["response"].as_str().unwrap_or("").to_string())
+        let content = body["response"]
+            .as_str()
+            .ok_or_else(|| TranslateError::ApiError("empty or null response field in Ollama response".to_string()))?;
+        Ok(content.to_string())
     }
 }
 
@@ -193,6 +196,9 @@ pub async fn translate_chunks(
         // Prepend last-200-words context as plain text so the translator sees it
         // in the "Text:" section of the prompt. Do NOT pre-assemble a full prompt
         // here — translate_chunk does that internally.
+        // Context is embedded into the text section of the prompt (not via build_prompt's
+        // prev_context param) because the Translator trait has no context parameter.
+        // The [Vocabulary reference] header signals to the model not to translate that block.
         let text = match &prev_context {
             Some(ctx) => format!(
                 "[Vocabulary reference from previous section — do not translate this part]\n\
@@ -217,7 +223,7 @@ pub async fn translate_chunks(
                 }
                 Err(e) => {
                     // Use longer backoff for rate limit errors
-                    let is_rate_limit = format!("{}", e).contains("429");
+                    let is_rate_limit = matches!(&e, TranslateError::ApiError(s) if s.starts_with("429"));
                     let wait_secs = if is_rate_limit { 30u64 } else { 2u64.pow(attempt) };
                     last_err = Some(e);
                     if attempt < 2 {
@@ -274,5 +280,75 @@ mod tests {
         let t = OllamaTranslator::new(None, None);
         assert_eq!(t.base_url, "http://localhost:11434");
         assert_eq!(t.model, "llama3.1:8b");
+    }
+
+    struct MockTranslator {
+        responses: std::sync::Mutex<Vec<Result<String, TranslateError>>>,
+    }
+
+    impl MockTranslator {
+        fn new(responses: Vec<Result<String, TranslateError>>) -> Self {
+            Self {
+                responses: std::sync::Mutex::new(responses),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl Translator for MockTranslator {
+        async fn translate_chunk(
+            &self, _text: &str, _src: &str, _tgt: &str, _level: &str,
+        ) -> Result<String, TranslateError> {
+            self.responses.lock().unwrap().remove(0)
+        }
+    }
+
+    #[tokio::test]
+    async fn translate_chunks_empty_input() {
+        let translator = MockTranslator::new(vec![]);
+        let result = translate_chunks(&translator, &[], "en", "de", "A2").await;
+        assert!(matches!(result, Ok(v) if v.is_empty()));
+    }
+
+    #[tokio::test]
+    async fn translate_chunks_propagates_error() {
+        let translator = MockTranslator::new(vec![
+            Err(TranslateError::ApiError("500: error".to_string())),
+            Err(TranslateError::ApiError("500: error".to_string())),
+            Err(TranslateError::ApiError("500: error".to_string())),
+        ]);
+        let chunks = vec![crate::book::Chunk {
+            chapter_index: 0,
+            chunk_index: 0,
+            content: "text".into(),
+        }];
+        let result = translate_chunks(&translator, &chunks, "en", "de", "A2").await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn translate_chunks_passes_context_to_second_chunk() {
+        let translator = MockTranslator::new(vec![
+            Ok("translated first chunk with unique words".to_string()),
+            Ok("translated second chunk".to_string()),
+        ]);
+        let chunks = vec![
+            crate::book::Chunk {
+                chapter_index: 0,
+                chunk_index: 0,
+                content: "first".into(),
+            },
+            crate::book::Chunk {
+                chapter_index: 0,
+                chunk_index: 1,
+                content: "second".into(),
+            },
+        ];
+        let result = translate_chunks(&translator, &chunks, "en", "de", "A2")
+            .await
+            .unwrap();
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0], "translated first chunk with unique words");
+        assert_eq!(result[1], "translated second chunk");
     }
 }
