@@ -38,19 +38,11 @@ fn strip_html(html: &str) -> String {
         }
     }
 
-    // Normalize: trim each paragraph, remove empty ones, ensure sentence-ending
-    // punctuation, then rejoin with \n\n
+    // Normalize: trim each paragraph, remove empty ones, rejoin with \n\n
     result
         .split("\n\n")
         .map(|p| p.split_whitespace().collect::<Vec<_>>().join(" "))
         .filter(|p| !p.trim().is_empty())
-        .map(|p| {
-            if p.ends_with(['.', '!', '?', ':', ';', ',']) {
-                p
-            } else {
-                format!("{}.", p)
-            }
-        })
         .collect::<Vec<_>>()
         .join("\n\n")
 }
@@ -76,12 +68,23 @@ fn strip_tags(html: &str) -> String {
 /// Extract text content from the first <h1> or <h2> tag.
 fn extract_title(html: &str) -> Option<String> {
     let lower = html.to_lowercase();
-    for (open_prefix, close_tag) in [("h1", "</h1>"), ("h2", "</h2>")] {
-        let open_pattern = format!("<{}", open_prefix);
+    for tag in ["h1", "h2"] {
+        let open_pattern = format!("<{}", tag);
+        let close_tag_lower = format!("</{}>", tag);
+        let close_tag_upper = format!("</{}>", tag.to_uppercase());
+        // open_pattern and '>' are ASCII — byte positions found in `lower` are
+        // identical to byte positions in `html` up to content_start.
         if let Some(open_pos) = lower.find(&open_pattern) {
             if let Some(gt_offset) = lower[open_pos..].find('>') {
                 let content_start = open_pos + gt_offset + 1;
-                if let Some(close_offset) = lower[content_start..].find(close_tag) {
+                // Search `html` directly for the close tag so that byte offsets
+                // remain valid even when heading content contains non-ASCII chars
+                // whose byte length changes under to_lowercase() (e.g. 'İ' → "i\u{307}").
+                let after_open = &html[content_start..];
+                let close_offset = after_open
+                    .find(&close_tag_lower)
+                    .or_else(|| after_open.find(&close_tag_upper));
+                if let Some(close_offset) = close_offset {
                     let raw = &html[content_start..content_start + close_offset];
                     let title = strip_tags(raw).trim().to_string();
                     if !title.is_empty() {
@@ -170,6 +173,25 @@ mod tests {
 
     #[test]
     fn strip_html_basic() {
-        assert_eq!(strip_html("<p>Hello <b>world</b></p>").trim(), "Hello world.");
+        assert_eq!(strip_html("<p>Hello <b>world</b></p>").trim(), "Hello world");
+    }
+
+    #[test]
+    fn parse_nonexistent_file_returns_error() {
+        use std::path::Path;
+        let result = parse_epub(Path::new("/nonexistent/path/book.epub"));
+        assert!(matches!(result, Err(EpubParseError::OpenError(_))));
+    }
+
+    #[test]
+    fn strip_html_only_whitespace_returns_empty() {
+        let result = strip_html("<p>   </p><div></div>");
+        assert!(result.trim().is_empty());
+    }
+
+    #[test]
+    fn extract_title_no_heading_returns_none() {
+        let html = "<html><body><p>Some content without headings.</p></body></html>";
+        assert!(extract_title(html).is_none());
     }
 }
