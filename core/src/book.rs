@@ -50,7 +50,7 @@ impl Book {
         if self.chapters.is_empty() {
             return vec![];
         }
-        let budget = (self.metadata.word_count / 10).min(5000).max(500);
+        let budget = (self.metadata.word_count / 10).clamp(500, 5000);
         let first = &self.chapters[0];
 
         if first.word_count() <= budget {
@@ -61,7 +61,7 @@ impl Book {
         let words: Vec<&str> = first.content.split_whitespace().collect();
         let truncated_raw = words[..budget.min(words.len())].join(" ");
         let truncated = truncated_raw
-            .rfind(|c: char| c == '.' || c == '!' || c == '?')
+            .rfind(['.', '!', '?'])
             .map(|pos| truncated_raw[..=pos].to_string())
             .unwrap_or(truncated_raw);
 
