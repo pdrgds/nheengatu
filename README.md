@@ -130,7 +130,9 @@ For **A1 and A2**, gunnlod uses a two-pass pipeline automatically:
 
 Separating these steps produces significantly better results at low levels: in testing, two-pass A1/A2 output showed 15–25% higher coverage of Goethe-Institut vocabulary lists compared to single-pass. It also prevents the looping and language leakage that occurs when a model tries to simplify and translate simultaneously.
 
-For **B1 and above**, a single pass is used. At these levels, simplification is light enough that combining both steps works well and avoids the extra cost.
+For **B1 and above**, a single pass is used — and this is intentional, not just a cost saving. Testing shows that forcing two-pass at B1 *hurts* quality: Pass 1 aggressively breaks sentences down to A1/A2 structure, and Pass 2 cannot recover the natural flow that B1 prose requires. Single-pass with B1 instructions produces more idiomatic, naturally-flowing text.
+
+You can override the default with `--two-pass` to force two-pass at any level, but it is not recommended for B1+.
 
 You can use different models for each pass with `--simplify-backend` and `--translate-model`:
 

@@ -453,6 +453,12 @@ pub async fn translate_chunks(
             }
             if let Some(e) = last_err { return Err(e); }
 
+            // Same-language: Pass 1 output is already in target language — skip translation pass
+            if source_lang == target_lang {
+                results.push(simplified);
+                continue;
+            }
+
             // --- Pass 2: translate simplified text ---
             print!(
                 "\r  [{}/{}] chapter {} chunk {} (translate)  ",
@@ -476,7 +482,7 @@ pub async fn translate_chunks(
             if let Some(e) = last_err { return Err(e); }
             result
         } else {
-            // --- Single pass: simplify + translate in one step ---
+            // --- Single pass ---
             print!(
                 "\r  [{}/{}] chapter {} chunk {}   ",
                 i + 1, total, chunk.chapter_index + 1, chunk.chunk_index + 1
@@ -486,7 +492,13 @@ pub async fn translate_chunks(
             let mut last_err = None;
             let mut result = String::new();
             for attempt in 0..3u32 {
-                match translator.translate_chunk(&chunk.content, source_lang, target_lang, level).await {
+                // Same-language: use simplify prompt; cross-language: combined simplify+translate
+                let call = if source_lang == target_lang {
+                    simplifier.simplify_chunk(&chunk.content, source_lang, level).await
+                } else {
+                    translator.translate_chunk(&chunk.content, source_lang, target_lang, level).await
+                };
+                match call {
                     Ok(t) => { result = t; last_err = None; break; }
                     Err(e) => {
                         let is_rate_limit = matches!(&e, TranslateError::ApiError(s) if s.starts_with("429"));

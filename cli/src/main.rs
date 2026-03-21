@@ -46,6 +46,9 @@ struct Cli {
     /// Prompt style: simple (level name only) or detailed (level rules + examples) [default: detailed]
     #[arg(long, default_value = "detailed")]
     prompt: String,
+    /// Force two-pass pipeline (simplify then translate) regardless of level
+    #[arg(long)]
+    two_pass: bool,
 }
 
 #[tokio::main]
@@ -117,7 +120,7 @@ async fn main() -> anyhow::Result<()> {
         other => anyhow::bail!("Unknown backend: {}. Use 'groq' or 'ollama'.", other),
     };
 
-    let two_pass = requires_two_pass(&cli.level);
+    let two_pass = cli.two_pass || requires_two_pass(&cli.level);
     if two_pass {
         println!("Pipeline: two-pass (simplify → translate) for level {}", cli.level);
     }
@@ -134,13 +137,25 @@ async fn main() -> anyhow::Result<()> {
             .push(text.clone());
     }
 
+    // Translate chapter titles to the target language
+    let mut translated_titles: std::collections::HashMap<usize, String> = std::collections::HashMap::new();
+    for &chapter_idx in chapter_map.keys() {
+        let raw_title = book
+            .chapters
+            .get(chapter_idx)
+            .and_then(|c| c.title.clone())
+            .unwrap_or_else(|| format!("Chapter {}", chapter_idx + 1));
+        let translated = translator
+            .translate_chunk(&raw_title, &source_lang, &cli.target_lang, "")
+            .await?;
+        translated_titles.insert(chapter_idx, translated.trim().to_string());
+    }
+
     let output_chapters: Vec<OutputChapter> = chapter_map
         .into_iter()
         .map(|(chapter_idx, texts)| {
-            let title = book
-                .chapters
-                .get(chapter_idx)
-                .and_then(|c| c.title.clone())
+            let title = translated_titles
+                .remove(&chapter_idx)
                 .unwrap_or_else(|| format!("Chapter {}", chapter_idx + 1));
             OutputChapter {
                 title,
