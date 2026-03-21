@@ -24,7 +24,16 @@ fn split_oversized(text: &str, max_words: usize) -> Vec<String> {
     words.chunks(max_words).map(|w| w.join(" ")).collect()
 }
 
+/// Splits a chapter into chunks of at most `config.max_words_per_chunk` words.
+///
+/// The `chunk_index` in each returned [`Chunk`] is 0-based within this chapter.
+/// If you need a global ordering across chapters, combine `chapter_index` and
+/// `chunk_index` as a composite key.
 pub fn chunk_chapter(chapter: &Chapter, config: &ChunkerConfig) -> Vec<Chunk> {
+    assert!(
+        config.max_words_per_chunk > 0,
+        "max_words_per_chunk must be greater than 0"
+    );
     // Split into sub-paragraphs; handle oversized single paragraphs
     let all_paragraphs: Vec<String> = chapter
         .content
@@ -50,7 +59,7 @@ pub fn chunk_chapter(chapter: &Chapter, config: &ChunkerConfig) -> Vec<Chunk> {
                 content: current.trim().to_string(),
             });
             idx += 1;
-            current = String::new();
+            current.clear();
             words = 0;
         }
         if !current.is_empty() {
@@ -126,6 +135,42 @@ mod tests {
             chunks.len() >= 2,
             "oversized paragraph must be split by word count"
         );
+    }
+
+    #[test]
+    fn oversized_exact_boundary_is_not_split() {
+        // Exactly max_words words — should return single chunk, not two
+        let content = "word ".repeat(2500).trim().to_string();
+        let ch = Chapter {
+            index: 0,
+            title: None,
+            content,
+        };
+        let chunks = chunk_chapter(&ch, &ChunkerConfig::default());
+        assert_eq!(chunks.len(), 1);
+    }
+
+    #[test]
+    fn chunk_chapters_preserves_chapter_indices() {
+        let config = ChunkerConfig::default();
+        let chapters = vec![
+            Chapter {
+                index: 0,
+                title: None,
+                content: "Short chapter one.".into(),
+            },
+            Chapter {
+                index: 1,
+                title: None,
+                content: "Short chapter two.".into(),
+            },
+        ];
+        let chunks = chunk_chapters(&chapters, &config);
+        assert_eq!(chunks.len(), 2);
+        assert_eq!(chunks[0].chapter_index, 0);
+        assert_eq!(chunks[1].chapter_index, 1);
+        assert_eq!(chunks[0].chunk_index, 0);
+        assert_eq!(chunks[1].chunk_index, 0);
     }
 
     #[test]
