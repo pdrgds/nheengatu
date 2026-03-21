@@ -1,5 +1,7 @@
 # gunnlod
 
+In Norse mythology, Gunnlöð was the keeper of the mead of poetry — the drink that granted whoever tasted it the gift of transforming thought into words any listener could understand.
+
 Translate and simplify EPUB books to a target CEFR language level using an LLM.
 
 Give it a German novel and ask for Portuguese at A2 — it parses the EPUB, chunks the text, instructs the model to rewrite each chunk at the right level, and produces a new EPUB ready for your Kindle.
