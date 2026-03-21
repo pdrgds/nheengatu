@@ -27,6 +27,7 @@ pub struct GroqTranslator {
     api_key: String,
     model: String,
     client: reqwest::Client,
+    pub simple_prompt: bool,
 }
 
 impl GroqTranslator {
@@ -37,6 +38,7 @@ impl GroqTranslator {
         Ok(Self {
             api_key,
             model: "llama-3.3-70b-versatile".to_string(),
+            simple_prompt: false,
             client: reqwest::Client::builder()
                 .timeout(Duration::from_secs(120))
                 .connect_timeout(Duration::from_secs(10))
@@ -60,6 +62,7 @@ impl GroqTranslator {
         target_lang: &str,
         level: &str,
         prev_context: Option<&str>,
+        simple_prompt: bool,
     ) -> String {
         let context_block = prev_context
             .map(|ctx| {
@@ -70,6 +73,15 @@ impl GroqTranslator {
                 )
             })
             .unwrap_or_default();
+
+        if simple_prompt {
+            return format!(
+                "{}Translate the following text from {} to {}. \
+                 Simplify it to CEFR level {}.\n\
+                 Output ONLY the translated text, nothing else.\n\nText:\n{}",
+                context_block, source_lang, target_lang, level, text
+            );
+        }
 
         let level_instructions = match level {
             "A1" => concat!(
@@ -142,7 +154,7 @@ impl Translator for GroqTranslator {
         target_lang: &str,
         level: &str,
     ) -> Result<String, TranslateError> {
-        let prompt = Self::build_prompt(text, source_lang, target_lang, level, None);
+        let prompt = Self::build_prompt(text, source_lang, target_lang, level, None, self.simple_prompt);
 
         let resp = self
             .client
@@ -174,6 +186,7 @@ impl Translator for GroqTranslator {
 pub struct OllamaTranslator {
     pub base_url: String,
     pub model: String,
+    pub simple_prompt: bool,
     client: reqwest::Client,
 }
 
@@ -182,6 +195,7 @@ impl OllamaTranslator {
         Self {
             base_url: base_url.unwrap_or_else(|| "http://localhost:11434".into()),
             model: model.unwrap_or_else(|| "llama3.1:8b".into()),
+            simple_prompt: false,
             client: reqwest::Client::builder()
                 .timeout(Duration::from_secs(300)) // local models can be slow
                 .connect_timeout(Duration::from_secs(10))
@@ -204,7 +218,7 @@ impl Translator for OllamaTranslator {
         target_lang: &str,
         level: &str,
     ) -> Result<String, TranslateError> {
-        let prompt = GroqTranslator::build_prompt(text, source_lang, target_lang, level, None);
+        let prompt = GroqTranslator::build_prompt(text, source_lang, target_lang, level, None, self.simple_prompt);
 
         let resp = self
             .client
@@ -318,7 +332,7 @@ mod tests {
 
     #[test]
     fn prompt_includes_all_params() {
-        let p = GroqTranslator::build_prompt("Hello world.", "en", "de", "A2", None);
+        let p = GroqTranslator::build_prompt("Hello world.", "en", "de", "A2", None, false);
         assert!(
             p.contains("en") && p.contains("de") && p.contains("A2") && p.contains("Hello world.")
         );
@@ -327,7 +341,7 @@ mod tests {
     #[test]
     fn prompt_includes_context_when_provided() {
         let ctx = "some previous context";
-        let p = GroqTranslator::build_prompt("New text.", "en", "de", "A2", Some(ctx));
+        let p = GroqTranslator::build_prompt("New text.", "en", "de", "A2", Some(ctx), false);
         assert!(p.contains(ctx));
         assert!(p.contains("New text."));
     }

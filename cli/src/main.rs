@@ -35,6 +35,9 @@ struct Cli {
     /// Only translate these chapters (1-based, comma-separated). E.g. --chapters 1,2,5
     #[arg(long, value_delimiter = ',')]
     chapters: Vec<usize>,
+    /// Prompt style: simple (level name only) or detailed (level rules + examples) [default: detailed]
+    #[arg(long, default_value = "detailed")]
+    prompt: String,
 }
 
 #[tokio::main]
@@ -68,9 +71,11 @@ async fn main() -> anyhow::Result<()> {
     let chunks = chunk_chapters(&selected_owned, &config);
     println!("{} chunks to translate", chunks.len());
 
+    let simple_prompt = cli.prompt == "simple";
     let translator: Box<dyn Translator> = match cli.backend.as_str() {
         "groq" => {
             let mut t = GroqTranslator::new(cli.groq_api_key)?;
+            t.simple_prompt = simple_prompt;
             if let Some(m) = cli.model {
                 t = t.with_model(m);
             }
@@ -78,7 +83,8 @@ async fn main() -> anyhow::Result<()> {
             Box::new(t)
         }
         "ollama" => {
-            let t = OllamaTranslator::new(Some(cli.ollama_url), cli.model);
+            let mut t = OllamaTranslator::new(Some(cli.ollama_url), cli.model);
+            t.simple_prompt = simple_prompt;
             println!("Translating via Ollama ({})...", t.model());
             Box::new(t)
         }
