@@ -59,6 +59,7 @@ pub async fn run_pipeline(
     config: &PipelineConfig,
     simplifier: &(dyn Translator + Send + Sync),
     translator: &(dyn Translator + Send + Sync),
+    on_chapter_done: &(dyn Fn(usize, usize) + Sync),   // (chapters_done_so_far, total_chapters)
 ) -> Result<(), PipelineError> {
     let book = epub_parser::parse_epub(input)?;
 
@@ -153,6 +154,12 @@ pub async fn run_pipeline(
         })
         .collect();
 
+    // Notify progress after translation completes
+    let total_chapters = output_chapters.len();
+    for i in 0..total_chapters {
+        on_chapter_done(i + 1, total_chapters);
+    }
+
     let epub_title = format!(
         "{} ({} {})",
         book.metadata.title, config.target_lang, config.level
@@ -160,4 +167,19 @@ pub async fn run_pipeline(
     epub_writer::write_epub(&epub_title, &config.target_lang, &output_chapters, output)?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod progress_tests {
+    #[test]
+    fn callback_signature_compiles() {
+        let mut calls: Vec<(usize, usize)> = vec![];
+        let mut cb = |current: usize, total: usize| {
+            calls.push((current, total));
+        };
+        cb(1, 5);
+        cb(2, 5);
+        assert_eq!(calls.len(), 2);
+        assert_eq!(calls[0], (1, 5));
+    }
 }

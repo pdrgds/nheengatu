@@ -99,7 +99,7 @@ async fn main() -> anyhow::Result<()> {
     };
 
     println!("Parsing {}...", cli.input.display());
-    run_pipeline(&cli.input, &cli.output, &config, simplifier.as_ref(), translator.as_ref()).await?;
+    run_pipeline(&cli.input, &cli.output, &config, simplifier.as_ref(), translator.as_ref(), &|_, _| {}).await?;
     println!("Done: {}", cli.output.display());
 
     Ok(())
