@@ -122,26 +122,30 @@ pub async fn run_pipeline(
             .push(text.clone());
     }
 
-    // Translate chapter titles to target language
+    // Translate chapter titles to target language (skip if title is empty)
     let mut translated_titles: std::collections::HashMap<usize, String> = std::collections::HashMap::new();
     for &chapter_idx in chapter_map.keys() {
         let raw_title = book
             .chapters
             .get(chapter_idx)
             .and_then(|c| c.title.clone())
-            .unwrap_or_else(|| format!("Chapter {}", chapter_idx + 1));
-        let translated = translator
-            .translate_chunk(&raw_title, &source_lang, &config.target_lang, "")
-            .await?;
-        translated_titles.insert(chapter_idx, translated.trim().to_string());
+            .unwrap_or_default();
+        let translated = if raw_title.is_empty() {
+            String::new()
+        } else {
+            translator
+                .translate_chunk(&raw_title, &source_lang, &config.target_lang, "")
+                .await?
+                .trim()
+                .to_string()
+        };
+        translated_titles.insert(chapter_idx, translated);
     }
 
     let output_chapters: Vec<OutputChapter> = chapter_map
         .into_iter()
         .map(|(chapter_idx, texts)| {
-            let title = translated_titles
-                .remove(&chapter_idx)
-                .unwrap_or_else(|| format!("Chapter {}", chapter_idx + 1));
+            let title = translated_titles.remove(&chapter_idx).unwrap_or_default();
             OutputChapter {
                 title,
                 content: texts.join("\n\n"),

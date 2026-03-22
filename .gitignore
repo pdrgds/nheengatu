@@ -1,3 +1,8 @@
 target/
 .env
 output/*.epub
+logs/
+docs/superpowers/
+.claude
+.claude-octopus
+.DS_Store

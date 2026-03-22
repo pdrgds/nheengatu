@@ -1,6 +1,6 @@
 # gunnlod
 
-In Norse mythology, Gunnlöð was the keeper of the mead of poetry — the drink that granted whoever tasted it the gift of transforming thought into words any listener could understand.
+In Norse mythology, Gunnlöð was the keeper of the mead of poetry — the drink that granted whoever tasted it mastery over language: the ability to compose, recite, and be understood.
 
 Translate and simplify EPUB books to a target CEFR language level using an LLM.
 
