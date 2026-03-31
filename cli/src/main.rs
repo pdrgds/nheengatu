@@ -1,13 +1,13 @@
 use clap::Parser;
 use dotenvy::dotenv;
-use gunnlod_core::{
+use nheengatu_core::{
     pipeline::{run_pipeline, PipelineConfig},
     translator::{GroqTranslator, OllamaTranslator, Translator},
 };
 use std::path::PathBuf;
 
 #[derive(Parser)]
-#[command(name = "gunnlod", about = "Translate and simplify books to your language level")]
+#[command(name = "nheengatu", about = "Translate and simplify books to your language level")]
 struct Cli {
     #[arg(short, long)]
     input: PathBuf,

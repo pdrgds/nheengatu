@@ -1,5 +1,5 @@
 #!/bin/bash
-# Two-pass test matrix for gunnlod — all runs via Groq.
+# Two-pass test matrix for nheengatu — all runs via Groq.
 #
 # Combos tested:
 #   70b_70b  — simplify=llama-3.3-70b  translate=llama-3.3-70b
@@ -14,11 +14,11 @@ set -e
 INPUT="${1:?Usage: run_tests.sh <input.epub> <chapter> <target_lang>}"
 CHAPTER="${2:?}"
 LANG="${3:?}"
-OUT_DIR="/tmp/gunnlod_tests/$(basename "$INPUT" .epub)_ch${CHAPTER}_${LANG}"
+OUT_DIR="/tmp/nheengatu_tests/$(basename "$INPUT" .epub)_ch${CHAPTER}_${LANG}"
 
 mkdir -p "$OUT_DIR"
 
-BIN="./target/release/gunnlod-cli"
+BIN="./target/release/nheengatu-cli"
 
 # Load .env if present
 if [ -f .env ]; then
@@ -41,7 +41,7 @@ COMBOS=(
 
 GRAND_TOTAL=$(( ${#LEVELS[@]} * ${#COMBOS[@]} ))
 
-echo "=== gunnlod test matrix (two-pass, all Groq) ==="
+echo "=== nheengatu test matrix (two-pass, all Groq) ==="
 echo "Input  : $INPUT  (chapter $CHAPTER, lang $LANG)"
 echo "Levels : ${LEVELS[*]}"
 echo ""

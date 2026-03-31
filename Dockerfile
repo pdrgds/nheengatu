@@ -13,14 +13,14 @@ RUN mkdir -p core/src cli/src web/src && \
     echo "fn main() {}" > cli/src/main.rs && \
     echo "fn main() {}" > web/src/main.rs && \
     touch core/src/lib.rs && \
-    cargo build --release -p gunnlod-web && \
+    cargo build --release -p nheengatu-web && \
     rm -rf core/src cli/src web/src
 
 # Build the real source
 COPY core core
 COPY web web
 RUN touch core/src/lib.rs web/src/main.rs && \
-    cargo build --release -p gunnlod-web
+    cargo build --release -p nheengatu-web
 
 # Runtime image
 FROM debian:bookworm-slim
@@ -28,8 +28,8 @@ FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y ca-certificates && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
-COPY --from=builder /app/target/release/gunnlod-web .
+COPY --from=builder /app/target/release/nheengatu-web .
 COPY web/templates templates
 
 EXPOSE 3000
-CMD ["./gunnlod-web"]
+CMD ["./nheengatu-web"]

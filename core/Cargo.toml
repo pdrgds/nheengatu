@@ -1,10 +1,10 @@
 [package]
-name = "gunnlod-core"
+name = "nheengatu-core"
 version = "0.1.0"
 edition = "2021"
 description = "Translate and simplify EPUB books to a target CEFR language level using an LLM"
 license = "MIT"
-repository = "https://github.com/pdrgds/gunnlod"
+repository = "https://github.com/pdrgds/nheengatu"
 keywords = ["epub", "translation", "llm", "cefr", "language-learning"]
 categories = ["text-processing", "internationalization"]
 exclude = ["../web", "../docs"]

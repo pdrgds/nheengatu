@@ -1,19 +1,19 @@
 [package]
-name = "gunnlod-cli"
+name = "nheengatu-cli"
 version = "0.1.0"
 edition = "2021"
 description = "CLI for translating and simplifying EPUB books to a target CEFR level"
 license = "MIT"
-repository = "https://github.com/pdrgds/gunnlod"
+repository = "https://github.com/pdrgds/nheengatu"
 keywords = ["epub", "translation", "llm", "cefr", "language-learning"]
 categories = ["command-line-utilities", "text-processing"]
 
 [[bin]]
-name = "gunnlod"
+name = "nheengatu"
 path = "src/main.rs"
 
 [dependencies]
-gunnlod-core = { path = "../core" }
+nheengatu-core = { path = "../core" }
 clap = { version = "4", features = ["derive", "env"] }
 anyhow = "1"
 tokio = { version = "1", features = ["full"] }

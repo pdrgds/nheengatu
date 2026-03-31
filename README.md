@@ -1,6 +1,6 @@
-# gunnlod
+# nheengatu
 
-In Norse mythology, Gunnlöð was the keeper of the mead of poetry — the drink that granted whoever tasted it mastery over language: the ability to compose, recite, and be understood.
+In Tupi mythology, Nheengatu — "the good language" — was the lingua geral that bridged dozens of peoples across the Amazon basin, turning mutual incomprehension into shared understanding.
 
 Translate and simplify EPUB books to a target CEFR language level using an LLM.
 
@@ -8,7 +8,7 @@ Give it a German novel and ask for Portuguese at A2 — it parses the EPUB, chun
 
 ---
 
-**Want the easy way?** A hosted version is available at [gunnlod.com](https://gunnlod.com) — upload, pay, download. No Rust, no API keys, no setup.
+**Want the easy way?** A hosted version is available at [nheengatu.com](https://nheengatu.com) — upload, pay, download. No Rust, no API keys, no setup.
 
 **Want to run it yourself?** Read on.
 
@@ -36,7 +36,7 @@ Get a free API key at [console.groq.com](https://console.groq.com).
 
 ```bash
 export GROQ_API_KEY=gsk_...
-cargo run -p gunnlod-cli --release -- \
+cargo run -p nheengatu-cli --release -- \
   -i book.epub -o book-pt-a2.epub \
   -t pt -l A2
 ```
@@ -45,7 +45,7 @@ cargo run -p gunnlod-cli --release -- \
 
 ```bash
 ollama pull llama3.1:8b
-cargo run -p gunnlod-cli --release -- \
+cargo run -p nheengatu-cli --release -- \
   -b ollama -i book.epub -o book-pt-a2.epub \
   -t pt -l A2
 ```
@@ -86,10 +86,10 @@ Any language the underlying model handles well. Tested: `de` `en` `fr` `es` `pt`
 
 ## Using the core library
 
-`gunnlod-core` exposes the full pipeline for use in your own applications:
+`nheengatu-core` exposes the full pipeline for use in your own applications:
 
 ```rust
-use gunnlod_core::{
+use nheengatu_core::{
     pipeline::{run_pipeline, PipelineConfig},
     translator::GroqTranslator,
 };

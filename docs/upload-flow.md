@@ -51,7 +51,7 @@ Invalid files get a `422 Unprocessable Entity` before any storage write happens.
 
 ### 2. EPUB parsing
 
-The raw bytes are written to a temp file and passed to `gunnlod_core::epub_parser::parse_epub`. This extracts:
+The raw bytes are written to a temp file and passed to `nheengatu_core::epub_parser::parse_epub`. This extracts:
 
 - Title
 - Word count (used for pricing)

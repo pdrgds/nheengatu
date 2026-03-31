@@ -1,4 +1,4 @@
-# Contributing to Gunnlod
+# Contributing to Nheengatu
 
 Thanks for your interest in contributing. This document covers what is in scope, how to get set up, and the expectations for pull requests.
 
@@ -6,17 +6,17 @@ Thanks for your interest in contributing. This document covers what is in scope,
 
 This repository contains two public crates:
 
-- **`gunnlod-core`** — the library. Contributions welcome to:
+- **`nheengatu-core`** — the library. Contributions welcome to:
   - `epub_parser` — EPUB parsing
   - `chunker` — text chunking logic
   - `translator` — the `Translator` trait and built-in backends (Groq, Ollama)
   - `pipeline` — the translation pipeline (`run_pipeline`, `PipelineConfig`)
-- **`gunnlod-cli`** — the command-line tool built on top of `gunnlod-core`
+- **`nheengatu-cli`** — the command-line tool built on top of `nheengatu-core`
 - **New translator backends** — any LLM or translation API that implements the `Translator` trait
 
 ## What is out of scope
 
-The hosted web service (`gunnlod-web`) lives in a separate private repository and is not open for external contributions.
+The hosted web service (`nheengatu-web`) lives in a separate private repository and is not open for external contributions.
 
 ## Local setup
 

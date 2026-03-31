@@ -22,7 +22,7 @@ from collections import defaultdict
 from urllib.request import urlopen
 from xml.etree import ElementTree as ET
 
-CACHE_DIR = Path.home() / ".cache" / "gunnlod" / "wordlists"
+CACHE_DIR = Path.home() / ".cache" / "nheengatu" / "wordlists"
 WORDLIST_BASE = "https://raw.githubusercontent.com/ilkermeliksitki/goethe-institute-wordlist/main"
 LEVEL_DIRS = {"A1": "a1", "A2": "a2", "B1": "b1"}
 LETTERS = list("abcdefghijklmnoprstuvwz")
