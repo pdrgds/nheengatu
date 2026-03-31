@@ -6,6 +6,16 @@ Translate and simplify EPUB books to a target CEFR language level using an LLM.
 
 Give it a German novel and ask for Portuguese at A2 — it parses the EPUB, chunks the text, instructs the model to rewrite each chunk at the right level, and produces a new EPUB ready for your Kindle.
 
+## Try it
+
+A sample book is included ([The Yellow Wallpaper](https://www.gutenberg.org/ebooks/1952), public domain):
+
+```bash
+nheengatu -i examples/the-yellow-wallpaper.epub --source-lang en -t pt -l A2 --chapters 1
+```
+
+This translates just chapter 1 (~2k words, one API call) — well within Groq's free tier limits.
+
 ## How it works
 
 1. Parses the EPUB and splits chapters into chunks (~2500 words each)
