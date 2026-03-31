@@ -6,14 +6,6 @@ Translate and simplify EPUB books to a target CEFR language level using an LLM.
 
 Give it a German novel and ask for Portuguese at A2 — it parses the EPUB, chunks the text, instructs the model to rewrite each chunk at the right level, and produces a new EPUB ready for your Kindle.
 
----
-
-**Want the easy way?** A hosted version is available at [nheengatu.com](https://nheengatu.com) — upload, pay, download. No Rust, no API keys, no setup.
-
-**Want to run it yourself?** Read on.
-
----
-
 ## How it works
 
 1. Parses the EPUB and splits chapters into chunks (~2500 words each)
@@ -147,8 +139,6 @@ core/   Library crate — EPUB parsing, chunking, translator trait, pipeline
 cli/    Binary crate — command-line interface
 tests/  Integration tests and fixtures
 ```
-
-The hosted service (`web/`) lives in a separate private repository.
 
 ## Building and testing
 
