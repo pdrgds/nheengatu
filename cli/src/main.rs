@@ -64,6 +64,12 @@ async fn main() -> anyhow::Result<()> {
     dotenv().ok();
     let cli = Cli::parse();
 
+    // Track whether all required fields were provided via flags (before we consume them)
+    let all_required_provided = cli.input.is_some()
+        && cli.source_lang.is_some()
+        && cli.target_lang.is_some()
+        && cli.level.is_some();
+
     // --- Resolve input file ---
     let input = match cli.input {
         Some(p) => p,
@@ -116,14 +122,15 @@ async fn main() -> anyhow::Result<()> {
     let mut force_two_pass = cli.two_pass;
     let mut max_chunk_words = cli.max_chunk_words;
 
-    // Only show standard/advanced prompt if no advanced flags were explicitly set
+    // Only show standard/advanced prompt if running interactively
+    // (i.e. some required field was not provided via flags)
     let has_advanced_flags = cli.backend.is_some()
         || cli.simplify_backend.is_some()
         || cli.model.is_some()
         || cli.translate_model.is_some()
         || cli.two_pass;
 
-    if !has_advanced_flags {
+    if !has_advanced_flags && !all_required_provided {
         if interactive::ask_advanced()? {
             backend = interactive::ask_backend()?;
             model = interactive::ask_model("Model for simplify pass?", "llama-3.3-70b-versatile")?;
