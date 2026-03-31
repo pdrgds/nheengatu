@@ -8,13 +8,13 @@ Give it a German novel and ask for Portuguese at A2 — it parses the EPUB, chun
 
 ## Try it
 
-A sample book is included ([The Yellow Wallpaper](https://www.gutenberg.org/ebooks/1952), public domain):
+A sample book is included ([Metamorphosis](https://www.gutenberg.org/ebooks/5200) by Franz Kafka, public domain):
 
 ```bash
-nheengatu -i examples/the-yellow-wallpaper.epub --source-lang en -t pt -l A2 --chapters 1
+nheengatu -i examples/metamorphosis.epub --source-lang en -t pt -l A2 --chapters 1
 ```
 
-This translates just chapter 1 (~2k words, one API call) — well within Groq's free tier limits.
+This translates just chapter 1 — well within Groq's free tier limits.
 
 ## How it works
 
