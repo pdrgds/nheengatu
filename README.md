@@ -1,6 +1,6 @@
 # nheengatu
 
-In Tupi mythology, Nheengatu — "the good language" — was the lingua geral that bridged dozens of peoples across the Amazon basin, turning mutual incomprehension into shared understanding.
+In Tupi mythology, Nheengatu — "the good language" — was the lingua franca that bridged dozens of peoples across the Amazon basin, turning mutual incomprehension into shared understanding.
 
 Translate and simplify EPUB books to a target CEFR language level using an LLM.
 
