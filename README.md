@@ -30,34 +30,54 @@ For **B1 and above**, a single pass is used. Forcing two passes at B1 hurts qual
 
 ## Quick start
 
-### With Groq (recommended)
-
-Get a free API key at [console.groq.com](https://console.groq.com).
+Just run it — the interactive guide walks you through everything:
 
 ```bash
-export GROQ_API_KEY=gsk_...
-cargo run -p nheengatu-cli --release -- \
-  -i book.epub -o book-pt-a2.epub \
-  -t pt -l A2
+nheengatu
 ```
 
-### With Ollama (local, no API key)
+```
+? What book do you want to translate?
+> book.epub
+
+? What language is this book in?
+> 1. German
+
+? What language should it be in?
+> 5. Portuguese
+
+? What's your level?
+> 2. Elementary (A2)
+
+? Which chapters? (enter for all, or e.g. 1,3,5)
+>
+
+? Standard or Advanced config?
+> 1. Standard (recommended)
+
+Translating "Der Prozess" → Portuguese at A2...
+[==================>     ] 6/10 chapters
+Done: der-prozess-pt-a2.epub
+```
+
+On first run it asks for your Groq API key (free at [console.groq.com](https://console.groq.com)) and saves it so you don't need to enter it again.
+
+### Non-interactive / scripting
+
+Every prompt can be skipped by passing the corresponding flag:
 
 ```bash
-ollama pull llama3.1:8b
-cargo run -p nheengatu-cli --release -- \
-  -b ollama -i book.epub -o book-pt-a2.epub \
-  -t pt -l A2
+nheengatu -i book.epub --source-lang de -t pt -l A2
 ```
 
-## CLI options
+### CLI options
 
 ```
 -i, --input <FILE>              Input EPUB
--o, --output <FILE>             Output EPUB
--t, --target-lang <LANG>        Target language code (de, pt, en, fr, es, …)
+-o, --output <FILE>             Output EPUB (default: auto-generated from title)
+-t, --target-lang <LANG>        Target language (name or code: Portuguese, pt)
 -l, --level <LEVEL>             CEFR level: A1 A2 B1 B2 C1 C2
-    --source-lang <LANG>        Source language (auto-detected from EPUB if omitted)
+    --source-lang <LANG>        Source language (name or code: German, de)
 -b, --backend <BACKEND>         groq or ollama [default: groq]
 -m, --model <MODEL>             Model override
     --simplify-backend <B>      Backend for pass 1 (simplify). Defaults to --backend
@@ -71,7 +91,7 @@ cargo run -p nheengatu-cli --release -- \
 
 ## Supported languages
 
-Any language the underlying model handles well. Tested: `de` `en` `fr` `es` `pt` `it` `nl` `pl` `ru` `ja` `zh`.
+German, English, French, Spanish, Portuguese, Italian, Dutch, Polish, Russian, Japanese, Chinese.
 
 ## CEFR levels
 
