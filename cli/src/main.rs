@@ -130,14 +130,12 @@ async fn main() -> anyhow::Result<()> {
         || cli.translate_model.is_some()
         || cli.two_pass;
 
-    if !has_advanced_flags && !all_required_provided {
-        if interactive::ask_advanced()? {
-            backend = interactive::ask_backend()?;
-            model = interactive::ask_model("Model for simplify pass?", "llama-3.3-70b-versatile")?;
-            translate_model = interactive::ask_model("Model for translate pass?", "same as above")?;
-            force_two_pass = interactive::ask_two_pass()?;
-            max_chunk_words = interactive::ask_max_chunk_words()?;
-        }
+    if !has_advanced_flags && !all_required_provided && interactive::ask_advanced()? {
+        backend = interactive::ask_backend()?;
+        model = interactive::ask_model("Model for simplify pass?", "llama-3.3-70b-versatile")?;
+        translate_model = interactive::ask_model("Model for translate pass?", "same as above")?;
+        force_two_pass = interactive::ask_two_pass()?;
+        max_chunk_words = interactive::ask_max_chunk_words()?;
     }
 
     let simplify_backend_str = simplify_backend.unwrap_or_else(|| backend.clone());
