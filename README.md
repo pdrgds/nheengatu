@@ -8,13 +8,13 @@ Give it a German novel and ask for Portuguese at A2 — it parses the EPUB, chun
 
 ## Try it
 
-A sample book is included ([Metamorphosis](https://www.gutenberg.org/ebooks/5200) by Franz Kafka, public domain):
+A sample book is included ([Metamorphosis](https://www.gutenberg.org/ebooks/5200) by Franz Kafka, public domain). Just run:
 
 ```bash
-nheengatu -i examples/metamorphosis.epub --source-lang en -t pt -l A2 --chapters 1
+nheengatu -i examples/metamorphosis.epub
 ```
 
-This translates just chapter 1 — well within Groq's free tier limits.
+The interactive guide will walk you through the rest. Pick chapter 1 to stay within Groq's free tier limits.
 
 ## How it works
 
