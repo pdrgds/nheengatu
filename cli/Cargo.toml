@@ -23,3 +23,6 @@ indicatif = "0.17"
 dirs = "6"
 toml = "0.8"
 serde = { version = "1", features = ["derive"] }
+
+[dev-dependencies]
+tempfile = "3"
