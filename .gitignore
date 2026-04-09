@@ -1,6 +1,6 @@
 target/
 .env
-output/*.epub
+output/*
 logs/
 docs/superpowers/
 .claude
