@@ -16,6 +16,21 @@ nheengatu -i examples/metamorphosis.epub
 
 The interactive guide will walk you through the rest. Pick chapter 1 to stay within Groq's free tier limits.
 
+Here's what chapter I of Kafka's Metamorphosis looks like at three different levels:
+
+<table>
+<tr>
+<td align="center"><strong>A1 — Beginner</strong></td>
+<td align="center"><strong>A2 — Elementary</strong></td>
+<td align="center"><strong>B1 — Intermediate</strong></td>
+</tr>
+<tr>
+<td><img src="examples/screenshots/metamorphosis-en-a1.png" width="300"></td>
+<td><img src="examples/screenshots/metamorphosis-en-a2.png" width="300"></td>
+<td><img src="examples/screenshots/metamorphosis-en-b1.png" width="300"></td>
+</tr>
+</table>
+
 ## How it works
 
 1. Parses the EPUB and splits chapters into chunks (~2500 words each)
