@@ -14,7 +14,7 @@ A sample book is included ([Metamorphosis](https://www.gutenberg.org/ebooks/5200
 nheengatu -i examples/metamorphosis.epub
 ```
 
-The interactive guide will walk you through the rest. Pick chapter 1 to stay within Groq's free tier limits.
+The interactive guide will walk you through the rest. The story chapters are 3, 4, and 5 (the EPUB also contains a cover page and Project Gutenberg header/footer). Pick chapter 3 to try just the first part and stay within Groq's free tier limits.
 
 Here's what chapter I of Kafka's Metamorphosis looks like at three different levels:
 
@@ -109,6 +109,8 @@ nheengatu -i book.epub --source-lang de -t pt -l A2
 ## Supported languages
 
 German, English, French, Spanish, Portuguese, Italian, Dutch, Polish, Russian, Japanese, Chinese.
+
+These are the languages that Ollama models support well. The Groq backend can handle more, but the list reflects what works reliably across both backends.
 
 ## CEFR levels
 
