@@ -132,7 +132,7 @@ async fn main() -> anyhow::Result<()> {
 
     if !has_advanced_flags && !all_required_provided && interactive::ask_advanced()? {
         backend = interactive::ask_backend()?;
-        model = interactive::ask_model("Model for simplify pass?", "llama-3.3-70b-versatile")?;
+        model = interactive::ask_model("Model for simplify pass?", "openai/gpt-oss-120b")?;
         translate_model = interactive::ask_model("Model for translate pass?", "same as above")?;
         force_two_pass = interactive::ask_two_pass()?;
         max_chunk_words = interactive::ask_max_chunk_words()?;
