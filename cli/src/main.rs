@@ -30,7 +30,7 @@ struct Cli {
     /// Backend for pass 1 (simplify). Defaults to --backend if not set.
     #[arg(long)]
     simplify_backend: Option<String>,
-    #[arg(long, env = "GROQ_API_KEY")]
+    #[arg(long, env = "GROQ_API_KEY", hide_env_values = true)]
     groq_api_key: Option<String>,
     #[arg(long, default_value = "http://localhost:11434")]
     ollama_url: String,
