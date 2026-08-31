@@ -16,6 +16,8 @@ const LANGUAGES: &[Language] = &[
     Language { code: "ru", name: "Russian" },
     Language { code: "ja", name: "Japanese" },
     Language { code: "zh", name: "Chinese" },
+    Language { code: "ko", name: "Korean" },
+    Language { code: "ar", name: "Arabic" },
 ];
 
 pub fn all_languages() -> Vec<Language> {
@@ -61,14 +63,14 @@ mod tests {
     }
 
     #[test]
-    fn all_languages_returns_11() {
-        assert_eq!(all_languages().len(), 11);
+    fn all_languages_returns_13() {
+        assert_eq!(all_languages().len(), 13);
     }
 
     #[test]
     fn all_languages_excludes_filters_one() {
         let filtered = all_languages_except("de");
-        assert_eq!(filtered.len(), 10);
+        assert_eq!(filtered.len(), 12);
         assert!(filtered.iter().all(|l| l.code != "de"));
     }
 }
