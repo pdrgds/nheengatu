@@ -47,7 +47,7 @@ impl GroqTranslator {
         }
         Ok(Self {
             api_key,
-            model: "llama-3.3-70b-versatile".to_string(),
+            model: "openai/gpt-oss-120b".to_string(),
             simple_prompt: false,
             client: reqwest::Client::builder()
                 .timeout(Duration::from_secs(120))
@@ -64,6 +64,25 @@ impl GroqTranslator {
 
     pub fn model(&self) -> &str {
         &self.model
+    }
+
+    /// Groq rejects `reasoning_effort: "low"` on non-reasoning models (qwen
+    /// accepts only `none`/`default`), so only send it where it is valid.
+    fn supports_reasoning_effort(model: &str) -> bool {
+        model.starts_with("openai/gpt-oss")
+    }
+
+    fn request_body(&self, prompt: &str) -> serde_json::Value {
+        let mut body = serde_json::json!({
+            "model": self.model,
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.3,
+            "max_tokens": 8192,
+        });
+        if Self::supports_reasoning_effort(&self.model) {
+            body["reasoning_effort"] = serde_json::Value::from("low");
+        }
+        body
     }
 
     pub fn build_prompt(
@@ -246,12 +265,7 @@ impl Translator for GroqTranslator {
             .client
             .post("https://api.groq.com/openai/v1/chat/completions")
             .header("Authorization", format!("Bearer {}", self.api_key))
-            .json(&serde_json::json!({
-                "model": self.model,
-                "messages": [{"role": "user", "content": prompt}],
-                "temperature": 0.3,
-                "max_tokens": 8192,
-            }))
+            .json(&self.request_body(&prompt))
             .send()
             .await?;
 
@@ -280,12 +294,7 @@ impl Translator for GroqTranslator {
             .client
             .post("https://api.groq.com/openai/v1/chat/completions")
             .header("Authorization", format!("Bearer {}", self.api_key))
-            .json(&serde_json::json!({
-                "model": self.model,
-                "messages": [{"role": "user", "content": prompt}],
-                "temperature": 0.3,
-                "max_tokens": 8192,
-            }))
+            .json(&self.request_body(&prompt))
             .send()
             .await?;
 
