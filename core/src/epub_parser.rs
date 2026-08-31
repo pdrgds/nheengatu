@@ -97,6 +97,23 @@ fn extract_title(html: &str) -> Option<String> {
     None
 }
 
+/// Project Gutenberg wraps its texts in boilerplate: a header line naming the
+/// book and author, start/end markers, and a full licence chapter. None of it
+/// is the story. Translating it wastes tokens and invites hallucination — in
+/// testing the model rendered "The Project Gutenberg eBook of Metamorphosis, by
+/// Franz Kafka" as "O e-book de Dom Quixote, de Miguel de Cervantes" — so it is
+/// dropped before the text reaches the pipeline.
+fn is_gutenberg_boilerplate(text: &str) -> bool {
+    text.to_lowercase().contains("project gutenberg")
+}
+
+fn strip_gutenberg_paragraphs(text: &str) -> String {
+    text.split("\n\n")
+        .filter(|p| !is_gutenberg_boilerplate(p))
+        .collect::<Vec<_>>()
+        .join("\n\n")
+}
+
 pub fn parse_epub(path: &Path) -> Result<Book, EpubParseError> {
     let mut doc = epub::doc::EpubDoc::new(path)
         .map_err(|e| EpubParseError::OpenError(e.to_string()))?;
@@ -111,7 +128,12 @@ pub fn parse_epub(path: &Path) -> Result<Book, EpubParseError> {
     for (index, idref) in spine_ids.iter().enumerate() {
         if let Some((html, _mime)) = doc.get_resource_str(idref) {
             let chapter_title = extract_title(&html);
-            let text = strip_html(&html);
+            // A chapter whose own title is Gutenberg boilerplate (the licence)
+            // is dropped whole; otherwise only the boilerplate paragraphs go.
+            if chapter_title.as_deref().is_some_and(is_gutenberg_boilerplate) {
+                continue;
+            }
+            let text = strip_gutenberg_paragraphs(&strip_html(&html));
             if !text.trim().is_empty() {
                 chapters.push(Chapter {
                     index,
@@ -169,6 +191,26 @@ mod tests {
         let html = "<p>First para.</p><p>Second para.</p>";
         let text = strip_html(html);
         assert!(text.contains("\n\n"), "paragraph breaks must be preserved");
+    }
+
+    #[test]
+    fn gutenberg_header_paragraph_is_stripped() {
+        let text = "The Project Gutenberg eBook of Metamorphosis, by Franz Kafka\n\nOne morning Gregor woke.";
+        let out = strip_gutenberg_paragraphs(text);
+        assert!(!out.to_lowercase().contains("project gutenberg"));
+        assert!(out.contains("One morning Gregor woke."));
+    }
+
+    #[test]
+    fn non_gutenberg_text_is_untouched() {
+        let text = "First para.\n\nSecond para.";
+        assert_eq!(strip_gutenberg_paragraphs(text), text);
+    }
+
+    #[test]
+    fn gutenberg_licence_chapter_is_detected_by_title() {
+        assert!(is_gutenberg_boilerplate("THE FULL PROJECT GUTENBERG\u{2122} LICENSE"));
+        assert!(!is_gutenberg_boilerplate("Chapter One"));
     }
 
     #[test]
