@@ -59,7 +59,10 @@ pub async fn run_pipeline(
     config: &PipelineConfig,
     simplifier: &(dyn Translator + Send + Sync),
     translator: &(dyn Translator + Send + Sync),
-    on_chapter_done: &(dyn Fn(usize, usize) + Sync),   // (chapters_done_so_far, total_chapters)
+    // Called as each chunk finishes: (chunks_done, total_chunks). Chunks, not
+    // chapters — a single chapter can be dozens of chunks, so chapter counts
+    // barely move. Previously this fired in a loop after all work was done.
+    on_chapter_done: &(dyn Fn(usize, usize) + Sync),
 ) -> Result<(), PipelineError> {
     let book = epub_parser::parse_epub(input)?;
 
@@ -111,6 +114,7 @@ pub async fn run_pipeline(
         &config.target_lang,
         &config.level,
         two_pass,
+        on_chapter_done,
     )
     .await?;
 
@@ -153,12 +157,6 @@ pub async fn run_pipeline(
             }
         })
         .collect();
-
-    // Notify progress after translation completes
-    let total_chapters = output_chapters.len();
-    for i in 0..total_chapters {
-        on_chapter_done(i + 1, total_chapters);
-    }
 
     let epub_title = format!(
         "{} ({} {})",

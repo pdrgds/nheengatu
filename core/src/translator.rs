@@ -433,6 +433,7 @@ pub async fn translate_chunks(
     target_lang: &str,
     level: &str,
     two_pass: bool,
+    on_progress: &(dyn Fn(usize, usize) + Sync),
 ) -> Result<Vec<String>, TranslateError> {
     use std::io::Write;
     let total = chunks.len();
@@ -465,6 +466,7 @@ pub async fn translate_chunks(
             // Same-language: Pass 1 output is already in target language — skip translation pass
             if source_lang == target_lang {
                 results.push(simplified);
+                on_progress(i + 1, total);
                 continue;
             }
 
@@ -522,6 +524,7 @@ pub async fn translate_chunks(
         };
 
         results.push(translated);
+        on_progress(i + 1, total);
     }
     println!();
     Ok(results)
@@ -613,8 +616,39 @@ mod tests {
     #[tokio::test]
     async fn translate_chunks_empty_input() {
         let translator = MockTranslator::new(vec![]);
-        let result = translate_chunks(&translator, &translator, &[], "en", "de", "A2", false).await;
+        let result = translate_chunks(&translator, &translator, &[], "en", "de", "A2", false, &|_, _| {}).await;
         assert!(matches!(result, Ok(v) if v.is_empty()));
+    }
+
+    #[tokio::test]
+    async fn progress_is_reported_as_each_chunk_finishes() {
+        use std::sync::Mutex;
+        let translator = MockTranslator::new(vec![
+            Ok("a".to_string()),
+            Ok("b".to_string()),
+            Ok("c".to_string()),
+        ]);
+        let mk = |ci, ki| crate::book::Chunk {
+            chapter_index: ci,
+            chunk_index: ki,
+            content: "text".into(),
+        };
+        let chunks = vec![mk(0, 0), mk(0, 1), mk(1, 0)];
+        let seen: Mutex<Vec<(usize, usize)>> = Mutex::new(Vec::new());
+        translate_chunks(
+            &translator,
+            &translator,
+            &chunks,
+            "en",
+            "de",
+            "B1",
+            false,
+            &|done, total| seen.lock().unwrap().push((done, total)),
+        )
+        .await
+        .unwrap();
+        // One report per chunk, counting up — not a burst once the work is over.
+        assert_eq!(*seen.lock().unwrap(), vec![(1, 3), (2, 3), (3, 3)]);
     }
 
     #[tokio::test]
@@ -632,7 +666,7 @@ mod tests {
             chunk_index: 0,
             content: "text".into(),
         }];
-        let result = translate_chunks(&translator, &translator, &chunks, "en", "de", "A2", false).await;
+        let result = translate_chunks(&translator, &translator, &chunks, "en", "de", "A2", false, &|_, _| {}).await;
         assert!(result.is_err());
     }
 
@@ -658,7 +692,7 @@ mod tests {
                 content: "second".into(),
             },
         ];
-        let result = translate_chunks(&translator, &translator, &chunks, "en", "de", "A1", true)
+        let result = translate_chunks(&translator, &translator, &chunks, "en", "de", "A1", true, &|_, _| {})
             .await
             .unwrap();
         assert_eq!(result.len(), 2);
