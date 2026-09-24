@@ -7,7 +7,7 @@ use clap::Parser;
 use dotenvy::dotenv;
 use nheengatu_core::{
     pipeline::{run_pipeline, PipelineConfig},
-    translator::{GroqTranslator, OllamaTranslator, Translator},
+    translator::{OllamaTranslator, OpenRouterTranslator, Translator},
 };
 use std::path::PathBuf;
 
@@ -30,8 +30,8 @@ struct Cli {
     /// Backend for pass 1 (simplify). Defaults to --backend if not set.
     #[arg(long)]
     simplify_backend: Option<String>,
-    #[arg(long, env = "GROQ_API_KEY", hide_env_values = true)]
-    groq_api_key: Option<String>,
+    #[arg(long, env = "OPENROUTER_API_KEY", hide_env_values = true)]
+    openrouter_api_key: Option<String>,
     #[arg(long, default_value = "http://localhost:11434")]
     ollama_url: String,
     #[arg(short, long)]
@@ -115,7 +115,7 @@ async fn main() -> anyhow::Result<()> {
     };
 
     // --- Standard vs Advanced ---
-    let mut backend = cli.backend.clone().unwrap_or_else(|| "groq".to_string());
+    let mut backend = cli.backend.clone().unwrap_or_else(|| "openrouter".to_string());
     let simplify_backend = cli.simplify_backend.clone();
     let mut model = cli.model.clone();
     let mut translate_model = cli.translate_model.clone();
@@ -132,7 +132,7 @@ async fn main() -> anyhow::Result<()> {
 
     if !has_advanced_flags && !all_required_provided && interactive::ask_advanced()? {
         backend = interactive::ask_backend()?;
-        model = interactive::ask_model("Model for simplify pass?", "openai/gpt-oss-120b")?;
+        model = interactive::ask_model("Model for simplify pass?", "meta-llama/llama-3.3-70b-instruct")?;
         translate_model = interactive::ask_model("Model for translate pass?", "same as above")?;
         force_two_pass = interactive::ask_two_pass()?;
         max_chunk_words = interactive::ask_max_chunk_words()?;
@@ -142,9 +142,9 @@ async fn main() -> anyhow::Result<()> {
 
     // --- Resolve API key ---
     let config_path = config::config_path();
-    let needs_groq = backend == "groq" || simplify_backend_str == "groq";
-    let groq_api_key = if needs_groq {
-        match config::resolve_api_key(cli.groq_api_key.as_deref(), &config_path) {
+    let needs_openrouter = backend == "openrouter" || simplify_backend_str == "openrouter";
+    let openrouter_api_key = if needs_openrouter {
+        match config::resolve_api_key(cli.openrouter_api_key.as_deref(), &config_path) {
             Some(key) => key,
             None => interactive::ask_api_key()?,
         }
@@ -166,8 +166,8 @@ async fn main() -> anyhow::Result<()> {
 
     // --- Build translators ---
     let simplifier: Box<dyn Translator> = match simplify_backend_str.as_str() {
-        "groq" => {
-            let mut s = GroqTranslator::new(groq_api_key.clone())?;
+        "openrouter" => {
+            let mut s = OpenRouterTranslator::new(openrouter_api_key.clone())?;
             s.simple_prompt = simple_prompt;
             if let Some(m) = model.clone() {
                 s = s.with_model(m);
@@ -179,12 +179,12 @@ async fn main() -> anyhow::Result<()> {
             s.simple_prompt = simple_prompt;
             Box::new(s)
         }
-        other => anyhow::bail!("Unknown simplify backend: {}. Use 'groq' or 'ollama'.", other),
+        other => anyhow::bail!("Unknown simplify backend: {}. Use 'openrouter' or 'ollama'.", other),
     };
 
     let translator: Box<dyn Translator> = match backend.as_str() {
-        "groq" => {
-            let mut t = GroqTranslator::new(groq_api_key)?;
+        "openrouter" => {
+            let mut t = OpenRouterTranslator::new(openrouter_api_key)?;
             let m = translate_model.or(model);
             if let Some(m) = m {
                 t = t.with_model(m);
@@ -196,7 +196,7 @@ async fn main() -> anyhow::Result<()> {
             let t = OllamaTranslator::new(Some(cli.ollama_url), m);
             Box::new(t)
         }
-        other => anyhow::bail!("Unknown backend: {}. Use 'groq' or 'ollama'.", other),
+        other => anyhow::bail!("Unknown backend: {}. Use 'openrouter' or 'ollama'.", other),
     };
 
     // --- Auto-generate output path if needed ---

@@ -10,6 +10,8 @@ pub enum TranslateError {
     ApiError(String),
     #[error("missing API key")]
     MissingApiKey,
+    #[error("rate limited by the API")]
+    RateLimited { retry_after: Option<u64> },
 }
 
 #[async_trait]
@@ -33,28 +35,210 @@ pub trait Translator: Send + Sync {
     }
 }
 
-pub struct GroqTranslator {
+pub fn build_prompt(
+    text: &str,
+    source_lang: &str,
+    target_lang: &str,
+    level: &str,
+    prev_context: Option<&str>,
+    simple_prompt: bool,
+) -> String {
+    let context_block = prev_context
+        .map(|ctx| {
+            format!(
+                "Context from the previous section (for vocabulary consistency \
+                 — do not translate this):\n{}\n\n---\n\n",
+                ctx
+            )
+        })
+        .unwrap_or_default();
+
+    if simple_prompt {
+        return format!(
+            "{}Translate the following text from {} to {}. \
+             Simplify it to CEFR level {}.\n\
+             Output ONLY the translated text, nothing else.\n\nText:\n{}",
+            context_block, source_lang, target_lang, level, text
+        );
+    }
+
+    let level_instructions = match level {
+        "A1" => concat!(
+            "You are writing for a complete beginner. Simplify the story aggressively.\n",
+            "Rules:\n",
+            "- One idea per sentence. Maximum 8 words per sentence.\n",
+            "- Only present tense and simple past (he went, she said).\n",
+            "- No subordinate clauses, no relative clauses, no complex grammar.\n",
+            "- Replace every difficult word with the simplest possible word.\n",
+            "- If a scene is complex, reduce it to the main action only.\n",
+            "- It is OK to lose detail. Clarity is more important than completeness.\n",
+            "\n",
+            "Style example (apply this to the target language):\n",
+            "WRONG: \"Despite his miserable living conditions, Harry maintained a resilient spirit.\"\n",
+            "RIGHT: \"Harry was sad. But he did not give up.\"\n",
+            "\n",
+            "WRONG: \"The letter, which had arrived mysteriously, contained an extraordinary invitation.\"\n",
+            "RIGHT: \"A letter came. It had an invitation. Harry was surprised.\"\n",
+        ),
+        "A2" => concat!(
+            "You are writing for an elementary learner. Simplify language and sentence structure.\n",
+            "Rules:\n",
+            "- Short, clear sentences (under 15 words). Two ideas per sentence at most.\n",
+            "- Use everyday vocabulary. Replace rare or formal words with common ones.\n",
+            "- Simple past and present tense. Basic connectors only: and, but, because, so, then.\n",
+            "- Keep the full story but simplify how it is told. You can drop small details.\n",
+            "\n",
+            "Style example (apply this to the target language):\n",
+            "WRONG: \"He resided with his relatives, who harboured a profound aversion towards him.\"\n",
+            "RIGHT: \"He lived with his aunt and uncle. They did not like him very much.\"\n",
+            "\n",
+            "WRONG: \"The magnificent owl descended gracefully, bearing a sealed parchment.\"\n",
+            "RIGHT: \"An owl flew down. It had a letter.\"\n",
+        ),
+        "B1" => concat!(
+            "You are writing for an intermediate learner.\n",
+            "Rules:\n",
+            "- Use clear, natural language. Sentences can be moderate length.\n",
+            "- Avoid rare words, idioms, and overly complex structures.\n",
+            "- Keep the full story and most details. Simplify only where needed.\n",
+        ),
+        "B2" => concat!(
+            "You are writing for an upper-intermediate learner.\n",
+            "Rules:\n",
+            "- Preserve the original style and narrative closely.\n",
+            "- Simplify only unusually complex sentences and rare vocabulary.\n",
+            "- Replace C1/C2 words with B2-level equivalents where possible.\n",
+        ),
+        _ => "Translate faithfully, preserving the original style and vocabulary.\n",
+    };
+
+    format!(
+        "{}Translate the following text from {} to {}.\n\
+         Target level: CEFR {}.\n\n\
+         {}\n\
+         Do NOT include any introduction, explanation, or commentary.\n\
+         Do NOT write sentences like \"Here is the translation\" or \"Here is the simplified text\".\n\
+         Output ONLY the translated and simplified text, nothing else.\n\nText:\n{}",
+        context_block, source_lang, target_lang, level, level_instructions, text
+    )
+}
+
+pub fn build_simplify_prompt(
+    text: &str,
+    lang: &str,
+    level: &str,
+    simple_prompt: bool,
+) -> String {
+    if simple_prompt {
+        return format!(
+            "Rewrite the following text in {lang}. \
+             Simplify it to CEFR level {level}. Keep it in {lang}. Do not translate it.\n\
+             Output ONLY the rewritten text, nothing else.\n\nText:\n{text}"
+        );
+    }
+
+    let level_instructions = match level {
+        "A1" => concat!(
+            "You are writing for a complete beginner. Simplify the story aggressively.\n",
+            "Rules:\n",
+            "- One idea per sentence. Maximum 8 words per sentence.\n",
+            "- Only present tense and simple past (he went, she said).\n",
+            "- No subordinate clauses, no relative clauses, no complex grammar.\n",
+            "- Replace every difficult word with the simplest possible word.\n",
+            "- If a scene is complex, reduce it to the main action only.\n",
+            "- It is OK to lose detail. Clarity is more important than completeness.\n",
+            "\n",
+            "Style example (apply this to the target language):\n",
+            "WRONG: \"Despite his miserable living conditions, Harry maintained a resilient spirit.\"\n",
+            "RIGHT: \"Harry was sad. But he did not give up.\"\n",
+            "\n",
+            "WRONG: \"The letter, which had arrived mysteriously, contained an extraordinary invitation.\"\n",
+            "RIGHT: \"A letter came. It had an invitation. Harry was surprised.\"\n",
+        ),
+        "A2" => concat!(
+            "You are writing for an elementary learner. Simplify language and sentence structure.\n",
+            "Rules:\n",
+            "- Short, clear sentences (under 15 words). Two ideas per sentence at most.\n",
+            "- Use everyday vocabulary. Replace rare or formal words with common ones.\n",
+            "- Simple past and present tense. Basic connectors only: and, but, because, so, then.\n",
+            "- Keep the full story but simplify how it is told. You can drop small details.\n",
+            "\n",
+            "Style example (apply this to the target language):\n",
+            "WRONG: \"He resided with his relatives, who harboured a profound aversion towards him.\"\n",
+            "RIGHT: \"He lived with his aunt and uncle. They did not like him very much.\"\n",
+            "\n",
+            "WRONG: \"The magnificent owl descended gracefully, bearing a sealed parchment.\"\n",
+            "RIGHT: \"An owl flew down. It had a letter.\"\n",
+        ),
+        "B1" => concat!(
+            "You are writing for an intermediate learner.\n",
+            "Rules:\n",
+            "- Use clear, natural language. Sentences can be moderate length.\n",
+            "- Avoid rare words, idioms, and overly complex structures.\n",
+            "- Keep the full story and most details. Simplify only where needed.\n",
+        ),
+        "B2" => concat!(
+            "You are writing for an upper-intermediate learner.\n",
+            "Rules:\n",
+            "- Preserve the original style and narrative closely.\n",
+            "- Simplify only unusually complex sentences and rare vocabulary.\n",
+            "- Replace C1/C2 words with B2-level equivalents where possible.\n",
+        ),
+        _ => "Rewrite faithfully, preserving the original style and vocabulary.\n",
+    };
+
+    format!(
+        "Rewrite the following {lang} text at CEFR level {level}.\n\
+         Keep the text in {lang} — do NOT translate it.\n\n\
+         {level_instructions}\n\
+         Do NOT include any introduction, explanation, or commentary.\n\
+         Do NOT write sentences like \"Here is the simplified text\".\n\
+         Do NOT repeat any sentence or phrase you have already written.\n\
+         Each sentence must say something new.\n\
+         Output ONLY the rewritten {lang} text, nothing else.\n\nText:\n{text}"
+    )
+}
+
+/// A full 2500-word chunk measures ~90s on OpenRouter, and it rotates between
+/// upstream providers of differing speed, so the old 120s ceiling (tuned for
+/// Groq) timed out mid-book. 300s matches the Ollama client.
+const REQUEST_TIMEOUT_SECS: u64 = 300;
+
+pub const OPENROUTER_API_URL: &str = "https://openrouter.ai/api/v1/chat/completions";
+pub const DEFAULT_MODEL: &str = "meta-llama/llama-3.3-70b-instruct";
+
+pub struct OpenRouterTranslator {
     api_key: String,
     model: String,
+    base_url: String,
     client: reqwest::Client,
     pub simple_prompt: bool,
 }
 
-impl GroqTranslator {
+impl OpenRouterTranslator {
     pub fn new(api_key: String) -> Result<Self, TranslateError> {
         if api_key.is_empty() {
             return Err(TranslateError::MissingApiKey);
         }
         Ok(Self {
             api_key,
-            model: "openai/gpt-oss-120b".to_string(),
+            model: DEFAULT_MODEL.to_string(),
+            base_url: OPENROUTER_API_URL.to_string(),
             simple_prompt: false,
             client: reqwest::Client::builder()
-                .timeout(Duration::from_secs(120))
+                .timeout(Duration::from_secs(REQUEST_TIMEOUT_SECS))
                 .connect_timeout(Duration::from_secs(10))
                 .build()
                 .expect("failed to build HTTP client"),
         })
+    }
+
+    /// Point the translator at a different OpenAI-compatible chat-completions
+    /// endpoint. `url` is the complete endpoint, not an origin — tests inject a
+    /// local mock server here.
+    pub fn with_base_url(mut self, url: String) -> Self {
+        self.base_url = url;
+        self
     }
 
     pub fn with_model(mut self, model: String) -> Self {
@@ -66,8 +250,9 @@ impl GroqTranslator {
         &self.model
     }
 
-    /// Groq rejects `reasoning_effort: "low"` on non-reasoning models (qwen
-    /// accepts only `none`/`default`), so only send it where it is valid.
+    /// Only reasoning models accept `reasoning_effort`; others reject it
+    /// outright, so only send it where it is valid. Evaluates false for the
+    /// Llama default and true when the model is overridden back to gpt-oss.
     fn supports_reasoning_effort(model: &str) -> bool {
         model.starts_with("openai/gpt-oss")
     }
@@ -85,173 +270,65 @@ impl GroqTranslator {
         body
     }
 
-    pub fn build_prompt(
-        text: &str,
-        source_lang: &str,
-        target_lang: &str,
-        level: &str,
-        prev_context: Option<&str>,
-        simple_prompt: bool,
-    ) -> String {
-        let context_block = prev_context
-            .map(|ctx| {
-                format!(
-                    "Context from the previous section (for vocabulary consistency \
-                     — do not translate this):\n{}\n\n---\n\n",
-                    ctx
-                )
-            })
-            .unwrap_or_default();
 
-        if simple_prompt {
-            return format!(
-                "{}Translate the following text from {} to {}. \
-                 Simplify it to CEFR level {}.\n\
-                 Output ONLY the translated text, nothing else.\n\nText:\n{}",
-                context_block, source_lang, target_lang, level, text
-            );
-        }
-
-        let level_instructions = match level {
-            "A1" => concat!(
-                "You are writing for a complete beginner. Simplify the story aggressively.\n",
-                "Rules:\n",
-                "- One idea per sentence. Maximum 8 words per sentence.\n",
-                "- Only present tense and simple past (he went, she said).\n",
-                "- No subordinate clauses, no relative clauses, no complex grammar.\n",
-                "- Replace every difficult word with the simplest possible word.\n",
-                "- If a scene is complex, reduce it to the main action only.\n",
-                "- It is OK to lose detail. Clarity is more important than completeness.\n",
-                "\n",
-                "Style example (apply this to the target language):\n",
-                "WRONG: \"Despite his miserable living conditions, Harry maintained a resilient spirit.\"\n",
-                "RIGHT: \"Harry was sad. But he did not give up.\"\n",
-                "\n",
-                "WRONG: \"The letter, which had arrived mysteriously, contained an extraordinary invitation.\"\n",
-                "RIGHT: \"A letter came. It had an invitation. Harry was surprised.\"\n",
-            ),
-            "A2" => concat!(
-                "You are writing for an elementary learner. Simplify language and sentence structure.\n",
-                "Rules:\n",
-                "- Short, clear sentences (under 15 words). Two ideas per sentence at most.\n",
-                "- Use everyday vocabulary. Replace rare or formal words with common ones.\n",
-                "- Simple past and present tense. Basic connectors only: and, but, because, so, then.\n",
-                "- Keep the full story but simplify how it is told. You can drop small details.\n",
-                "\n",
-                "Style example (apply this to the target language):\n",
-                "WRONG: \"He resided with his relatives, who harboured a profound aversion towards him.\"\n",
-                "RIGHT: \"He lived with his aunt and uncle. They did not like him very much.\"\n",
-                "\n",
-                "WRONG: \"The magnificent owl descended gracefully, bearing a sealed parchment.\"\n",
-                "RIGHT: \"An owl flew down. It had a letter.\"\n",
-            ),
-            "B1" => concat!(
-                "You are writing for an intermediate learner.\n",
-                "Rules:\n",
-                "- Use clear, natural language. Sentences can be moderate length.\n",
-                "- Avoid rare words, idioms, and overly complex structures.\n",
-                "- Keep the full story and most details. Simplify only where needed.\n",
-            ),
-            "B2" => concat!(
-                "You are writing for an upper-intermediate learner.\n",
-                "Rules:\n",
-                "- Preserve the original style and narrative closely.\n",
-                "- Simplify only unusually complex sentences and rare vocabulary.\n",
-                "- Replace C1/C2 words with B2-level equivalents where possible.\n",
-            ),
-            _ => "Translate faithfully, preserving the original style and vocabulary.\n",
-        };
-
-        format!(
-            "{}Translate the following text from {} to {}.\n\
-             Target level: CEFR {}.\n\n\
-             {}\n\
-             Do NOT include any introduction, explanation, or commentary.\n\
-             Do NOT write sentences like \"Here is the translation\" or \"Here is the simplified text\".\n\
-             Output ONLY the translated and simplified text, nothing else.\n\nText:\n{}",
-            context_block, source_lang, target_lang, level, level_instructions, text
-        )
+    /// Parse a `Retry-After` header holding a delay in seconds. OpenRouter may
+    /// also send an HTTP-date, which we deliberately do not parse — callers
+    /// fall back to their default wait when this returns None.
+    fn parse_retry_after(headers: &reqwest::header::HeaderMap) -> Option<u64> {
+        headers
+            .get(reqwest::header::RETRY_AFTER)?
+            .to_str()
+            .ok()?
+            .trim()
+            .parse::<u64>()
+            .ok()
     }
 
-    pub fn build_simplify_prompt(
-        text: &str,
-        lang: &str,
-        level: &str,
-        simple_prompt: bool,
-    ) -> String {
-        if simple_prompt {
-            return format!(
-                "Rewrite the following text in {lang}. \
-                 Simplify it to CEFR level {level}. Keep it in {lang}. Do not translate it.\n\
-                 Output ONLY the rewritten text, nothing else.\n\nText:\n{text}"
-            );
+    /// Send one chat-completion request and extract the message content.
+    ///
+    /// OpenRouter can answer HTTP 200 with a top-level `error` object and no
+    /// `choices`, so the body is inspected for that before indexing into
+    /// `choices` — otherwise a real API error surfaces as "empty content".
+    async fn complete(&self, prompt: &str) -> Result<String, TranslateError> {
+        let resp = self
+            .client
+            .post(&self.base_url)
+            .header("Authorization", format!("Bearer {}", self.api_key))
+            .json(&self.request_body(prompt))
+            .send()
+            .await?;
+
+        let status = resp.status();
+        if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+            let retry_after = Self::parse_retry_after(resp.headers());
+            return Err(TranslateError::RateLimited { retry_after });
         }
 
-        let level_instructions = match level {
-            "A1" => concat!(
-                "You are writing for a complete beginner. Simplify the story aggressively.\n",
-                "Rules:\n",
-                "- One idea per sentence. Maximum 8 words per sentence.\n",
-                "- Only present tense and simple past (he went, she said).\n",
-                "- No subordinate clauses, no relative clauses, no complex grammar.\n",
-                "- Replace every difficult word with the simplest possible word.\n",
-                "- If a scene is complex, reduce it to the main action only.\n",
-                "- It is OK to lose detail. Clarity is more important than completeness.\n",
-                "\n",
-                "Style example (apply this to the target language):\n",
-                "WRONG: \"Despite his miserable living conditions, Harry maintained a resilient spirit.\"\n",
-                "RIGHT: \"Harry was sad. But he did not give up.\"\n",
-                "\n",
-                "WRONG: \"The letter, which had arrived mysteriously, contained an extraordinary invitation.\"\n",
-                "RIGHT: \"A letter came. It had an invitation. Harry was surprised.\"\n",
-            ),
-            "A2" => concat!(
-                "You are writing for an elementary learner. Simplify language and sentence structure.\n",
-                "Rules:\n",
-                "- Short, clear sentences (under 15 words). Two ideas per sentence at most.\n",
-                "- Use everyday vocabulary. Replace rare or formal words with common ones.\n",
-                "- Simple past and present tense. Basic connectors only: and, but, because, so, then.\n",
-                "- Keep the full story but simplify how it is told. You can drop small details.\n",
-                "\n",
-                "Style example (apply this to the target language):\n",
-                "WRONG: \"He resided with his relatives, who harboured a profound aversion towards him.\"\n",
-                "RIGHT: \"He lived with his aunt and uncle. They did not like him very much.\"\n",
-                "\n",
-                "WRONG: \"The magnificent owl descended gracefully, bearing a sealed parchment.\"\n",
-                "RIGHT: \"An owl flew down. It had a letter.\"\n",
-            ),
-            "B1" => concat!(
-                "You are writing for an intermediate learner.\n",
-                "Rules:\n",
-                "- Use clear, natural language. Sentences can be moderate length.\n",
-                "- Avoid rare words, idioms, and overly complex structures.\n",
-                "- Keep the full story and most details. Simplify only where needed.\n",
-            ),
-            "B2" => concat!(
-                "You are writing for an upper-intermediate learner.\n",
-                "Rules:\n",
-                "- Preserve the original style and narrative closely.\n",
-                "- Simplify only unusually complex sentences and rare vocabulary.\n",
-                "- Replace C1/C2 words with B2-level equivalents where possible.\n",
-            ),
-            _ => "Rewrite faithfully, preserving the original style and vocabulary.\n",
-        };
+        if !status.is_success() {
+            let body = resp.text().await.unwrap_or_default();
+            return Err(TranslateError::ApiError(format!("{}: {}", status.as_u16(), body)));
+        }
 
-        format!(
-            "Rewrite the following {lang} text at CEFR level {level}.\n\
-             Keep the text in {lang} — do NOT translate it.\n\n\
-             {level_instructions}\n\
-             Do NOT include any introduction, explanation, or commentary.\n\
-             Do NOT write sentences like \"Here is the simplified text\".\n\
-             Do NOT repeat any sentence or phrase you have already written.\n\
-             Each sentence must say something new.\n\
-             Output ONLY the rewritten {lang} text, nothing else.\n\nText:\n{text}"
-        )
+        let body: serde_json::Value = resp.json().await?;
+        if let Some(err) = body.get("error") {
+            let message = err
+                .get("message")
+                .and_then(|m| m.as_str())
+                .map(|m| m.to_string())
+                .unwrap_or_else(|| err.to_string());
+            return Err(TranslateError::ApiError(message));
+        }
+
+        let content = body["choices"][0]["message"]["content"]
+            .as_str()
+            .ok_or_else(|| TranslateError::ApiError("empty or null content in API response".to_string()))?;
+        Ok(content.to_string())
     }
+
 }
 
 #[async_trait]
-impl Translator for GroqTranslator {
+impl Translator for OpenRouterTranslator {
     async fn translate_chunk(
         &self,
         text: &str,
@@ -259,27 +336,8 @@ impl Translator for GroqTranslator {
         target_lang: &str,
         level: &str,
     ) -> Result<String, TranslateError> {
-        let prompt = Self::build_prompt(text, source_lang, target_lang, level, None, self.simple_prompt);
-
-        let resp = self
-            .client
-            .post("https://api.groq.com/openai/v1/chat/completions")
-            .header("Authorization", format!("Bearer {}", self.api_key))
-            .json(&self.request_body(&prompt))
-            .send()
-            .await?;
-
-        if !resp.status().is_success() {
-            let status = resp.status().as_u16();
-            let body = resp.text().await.unwrap_or_default();
-            return Err(TranslateError::ApiError(format!("{}: {}", status, body)));
-        }
-
-        let body: serde_json::Value = resp.json().await?;
-        let content = body["choices"][0]["message"]["content"]
-            .as_str()
-            .ok_or_else(|| TranslateError::ApiError("empty or null content in API response".to_string()))?;
-        Ok(content.to_string())
+        let prompt = build_prompt(text, source_lang, target_lang, level, None, self.simple_prompt);
+        self.complete(&prompt).await
     }
 
     async fn simplify_chunk(
@@ -288,27 +346,8 @@ impl Translator for GroqTranslator {
         lang: &str,
         level: &str,
     ) -> Result<String, TranslateError> {
-        let prompt = Self::build_simplify_prompt(text, lang, level, self.simple_prompt);
-
-        let resp = self
-            .client
-            .post("https://api.groq.com/openai/v1/chat/completions")
-            .header("Authorization", format!("Bearer {}", self.api_key))
-            .json(&self.request_body(&prompt))
-            .send()
-            .await?;
-
-        if !resp.status().is_success() {
-            let status = resp.status().as_u16();
-            let body = resp.text().await.unwrap_or_default();
-            return Err(TranslateError::ApiError(format!("{}: {}", status, body)));
-        }
-
-        let body: serde_json::Value = resp.json().await?;
-        let content = body["choices"][0]["message"]["content"]
-            .as_str()
-            .ok_or_else(|| TranslateError::ApiError("empty or null content in API response".to_string()))?;
-        Ok(content.to_string())
+        let prompt = build_simplify_prompt(text, lang, level, self.simple_prompt);
+        self.complete(&prompt).await
     }
 }
 
@@ -347,7 +386,7 @@ impl Translator for OllamaTranslator {
         target_lang: &str,
         level: &str,
     ) -> Result<String, TranslateError> {
-        let prompt = GroqTranslator::build_prompt(text, source_lang, target_lang, level, None, self.simple_prompt);
+        let prompt = build_prompt(text, source_lang, target_lang, level, None, self.simple_prompt);
 
         let resp = self
             .client
@@ -379,7 +418,7 @@ impl Translator for OllamaTranslator {
         lang: &str,
         level: &str,
     ) -> Result<String, TranslateError> {
-        let prompt = GroqTranslator::build_simplify_prompt(text, lang, level, self.simple_prompt);
+        let prompt = build_simplify_prompt(text, lang, level, self.simple_prompt);
 
         let resp = self
             .client
@@ -414,6 +453,17 @@ pub fn requires_two_pass(level: &str) -> bool {
     matches!(level, "A1" | "A2")
 }
 
+/// How long to wait before retrying a failed chunk. Rate limits honour the
+/// server's `Retry-After` when it sent one and otherwise back off a flat 30s;
+/// every other error uses exponential backoff.
+pub fn retry_delay_secs(err: &TranslateError, attempt: u32) -> u64 {
+    const RATE_LIMIT_FALLBACK_SECS: u64 = 30;
+    match err {
+        TranslateError::RateLimited { retry_after } => retry_after.unwrap_or(RATE_LIMIT_FALLBACK_SECS),
+        _ => 2u64.pow(attempt),
+    }
+}
+
 /// Translate all chunks sequentially.
 ///
 /// When `two_pass` is true (recommended for A1/A2):
@@ -424,7 +474,7 @@ pub fn requires_two_pass(level: &str) -> bool {
 ///   Single pass: `translator` simplifies and translates in one step.
 ///
 /// Retries up to 3 times per pass with exponential backoff.
-/// On rate-limit errors (429), waits 30s before retrying.
+/// On rate-limit errors (429), honours `Retry-After` when present, else waits 30s.
 pub async fn translate_chunks(
     simplifier: &dyn Translator,
     translator: &dyn Translator,
@@ -454,8 +504,7 @@ pub async fn translate_chunks(
                 match simplifier.simplify_chunk(&chunk.content, source_lang, level).await {
                     Ok(t) => { simplified = t; last_err = None; break; }
                     Err(e) => {
-                        let is_rate_limit = matches!(&e, TranslateError::ApiError(s) if s.starts_with("429"));
-                        let wait_secs = if is_rate_limit { 30u64 } else { 2u64.pow(attempt) };
+                        let wait_secs = retry_delay_secs(&e, attempt);
                         last_err = Some(e);
                         if attempt < 2 { tokio::time::sleep(Duration::from_secs(wait_secs)).await; }
                     }
@@ -483,8 +532,7 @@ pub async fn translate_chunks(
                 match translator.translate_chunk(&simplified, source_lang, target_lang, "").await {
                     Ok(t) => { result = t; last_err = None; break; }
                     Err(e) => {
-                        let is_rate_limit = matches!(&e, TranslateError::ApiError(s) if s.starts_with("429"));
-                        let wait_secs = if is_rate_limit { 30u64 } else { 2u64.pow(attempt) };
+                        let wait_secs = retry_delay_secs(&e, attempt);
                         last_err = Some(e);
                         if attempt < 2 { tokio::time::sleep(Duration::from_secs(wait_secs)).await; }
                     }
@@ -512,8 +560,7 @@ pub async fn translate_chunks(
                 match call {
                     Ok(t) => { result = t; last_err = None; break; }
                     Err(e) => {
-                        let is_rate_limit = matches!(&e, TranslateError::ApiError(s) if s.starts_with("429"));
-                        let wait_secs = if is_rate_limit { 30u64 } else { 2u64.pow(attempt) };
+                        let wait_secs = retry_delay_secs(&e, attempt);
                         last_err = Some(e);
                         if attempt < 2 { tokio::time::sleep(Duration::from_secs(wait_secs)).await; }
                     }
@@ -534,17 +581,147 @@ pub async fn translate_chunks(
 mod tests {
     use super::*;
 
+    use wiremock::matchers::{header, method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    async fn translator_for(server: &MockServer) -> OpenRouterTranslator {
+        OpenRouterTranslator::new("test-key".to_string())
+            .unwrap()
+            .with_base_url(format!("{}/api/v1/chat/completions", server.uri()))
+    }
+
+    #[tokio::test]
+    async fn extracts_content_from_successful_response() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/api/v1/chat/completions"))
+            .and(header("Authorization", "Bearer test-key"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "choices": [{"message": {"content": "Hallo Welt."}}]
+            })))
+            .mount(&server)
+            .await;
+
+        let t = translator_for(&server).await;
+        let out = t.translate_chunk("Hello world.", "en", "de", "A2").await.unwrap();
+        assert_eq!(out, "Hallo Welt.");
+    }
+
+    #[tokio::test]
+    async fn surfaces_error_object_returned_with_http_200() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "error": {"code": 502, "message": "upstream provider returned nothing"}
+            })))
+            .mount(&server)
+            .await;
+
+        let t = translator_for(&server).await;
+        let err = t.translate_chunk("Hello.", "en", "de", "A2").await.unwrap_err();
+        match err {
+            TranslateError::ApiError(m) => {
+                assert!(m.contains("upstream provider returned nothing"), "got: {}", m);
+                assert!(!m.contains("empty or null content"), "masked the real error: {}", m);
+            }
+            other => panic!("expected ApiError, got {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    async fn propagates_non_success_status_with_body() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(401).set_body_string("invalid credentials"))
+            .mount(&server)
+            .await;
+
+        let t = translator_for(&server).await;
+        let err = t.translate_chunk("Hello.", "en", "de", "A2").await.unwrap_err();
+        match err {
+            TranslateError::ApiError(m) => {
+                assert!(m.contains("401"), "got: {}", m);
+                assert!(m.contains("invalid credentials"), "got: {}", m);
+            }
+            other => panic!("expected ApiError, got {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    async fn maps_429_to_rate_limited_with_retry_after() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(429).insert_header("retry-after", "12"))
+            .mount(&server)
+            .await;
+
+        let t = translator_for(&server).await;
+        let err = t.simplify_chunk("Hello.", "en", "A2").await.unwrap_err();
+        match err {
+            TranslateError::RateLimited { retry_after } => assert_eq!(retry_after, Some(12)),
+            other => panic!("expected RateLimited, got {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    async fn rate_limit_without_parseable_retry_after_is_none() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(429).insert_header("retry-after", "Wed, 21 Oct 2026 07:28:00 GMT"))
+            .mount(&server)
+            .await;
+
+        let t = translator_for(&server).await;
+        let err = t.translate_chunk("Hello.", "en", "de", "A2").await.unwrap_err();
+        match err {
+            TranslateError::RateLimited { retry_after } => assert_eq!(retry_after, None),
+            other => panic!("expected RateLimited, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn defaults_to_llama_on_openrouter() {
+        let t = OpenRouterTranslator::new("key".to_string()).unwrap();
+        assert_eq!(t.model(), "meta-llama/llama-3.3-70b-instruct");
+        assert_eq!(t.base_url, "https://openrouter.ai/api/v1/chat/completions");
+    }
+
+    #[test]
+    fn reasoning_effort_off_for_llama_on_for_gpt_oss() {
+        assert!(!OpenRouterTranslator::supports_reasoning_effort(DEFAULT_MODEL));
+        assert!(OpenRouterTranslator::supports_reasoning_effort("openai/gpt-oss-120b"));
+    }
+
+    #[test]
+    fn retry_delay_honours_retry_after() {
+        let e = TranslateError::RateLimited { retry_after: Some(7) };
+        assert_eq!(retry_delay_secs(&e, 0), 7);
+    }
+
+    #[test]
+    fn retry_delay_falls_back_when_no_retry_after() {
+        let e = TranslateError::RateLimited { retry_after: None };
+        assert_eq!(retry_delay_secs(&e, 0), 30);
+    }
+
+    #[test]
+    fn retry_delay_backs_off_for_other_errors() {
+        let e = TranslateError::ApiError("500: boom".to_string());
+        assert_eq!(retry_delay_secs(&e, 0), 1);
+        assert_eq!(retry_delay_secs(&e, 2), 4);
+    }
+
     #[test]
     fn rejects_empty_key() {
         assert!(matches!(
-            GroqTranslator::new(String::new()),
+            OpenRouterTranslator::new(String::new()),
             Err(TranslateError::MissingApiKey)
         ));
     }
 
     #[test]
     fn prompt_includes_all_params() {
-        let p = GroqTranslator::build_prompt("Hello world.", "en", "de", "A2", None, false);
+        let p = build_prompt("Hello world.", "en", "de", "A2", None, false);
         assert!(
             p.contains("en") && p.contains("de") && p.contains("A2") && p.contains("Hello world.")
         );
@@ -553,14 +730,14 @@ mod tests {
     #[test]
     fn prompt_includes_context_when_provided() {
         let ctx = "some previous context";
-        let p = GroqTranslator::build_prompt("New text.", "en", "de", "A2", Some(ctx), false);
+        let p = build_prompt("New text.", "en", "de", "A2", Some(ctx), false);
         assert!(p.contains(ctx));
         assert!(p.contains("New text."));
     }
 
     #[test]
     fn simplify_prompt_keeps_same_language() {
-        let p = GroqTranslator::build_simplify_prompt("Hallo Welt.", "German", "A1", false);
+        let p = build_simplify_prompt("Hallo Welt.", "German", "A1", false);
         assert!(p.contains("German"));
         assert!(p.contains("A1"));
         assert!(p.contains("Hallo Welt."));
@@ -572,14 +749,14 @@ mod tests {
 
     #[test]
     fn simplify_prompt_contains_anti_repetition() {
-        let p = GroqTranslator::build_simplify_prompt("some text", "English", "A2", false);
+        let p = build_simplify_prompt("some text", "English", "A2", false);
         assert!(p.contains("Do NOT repeat any sentence"));
         assert!(p.contains("Each sentence must say something new"));
     }
 
     #[test]
     fn simplify_prompt_simple_mode() {
-        let p = GroqTranslator::build_simplify_prompt("Bonjour.", "French", "B1", true);
+        let p = build_simplify_prompt("Bonjour.", "French", "B1", true);
         assert!(p.contains("French"));
         assert!(p.contains("B1"));
         assert!(p.contains("Bonjour."));

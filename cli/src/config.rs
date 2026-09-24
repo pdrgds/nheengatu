@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct Config {
-    pub groq_api_key: Option<String>,
+    pub openrouter_api_key: Option<String>,
 }
 
 /// Returns the default config file path for this platform.
@@ -30,7 +30,7 @@ pub fn save_config_to(config: &Config, path: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Resolve the Groq API key: flag > env > config file.
+/// Resolve the OpenRouter API key: flag > env > config file.
 /// Returns None if not found anywhere.
 pub fn resolve_api_key(flag_value: Option<&str>, config_path: &Path) -> Option<String> {
     // 1. CLI flag (skip empty strings from clap defaults)
@@ -41,7 +41,7 @@ pub fn resolve_api_key(flag_value: Option<&str>, config_path: &Path) -> Option<S
     }
 
     // 2. Environment variable
-    if let Ok(key) = std::env::var("GROQ_API_KEY") {
+    if let Ok(key) = std::env::var("OPENROUTER_API_KEY") {
         if !key.is_empty() {
             return Some(key);
         }
@@ -49,7 +49,7 @@ pub fn resolve_api_key(flag_value: Option<&str>, config_path: &Path) -> Option<S
 
     // 3. Config file
     let cfg = load_config_from(config_path);
-    cfg.groq_api_key
+    cfg.openrouter_api_key
 }
 
 #[cfg(test)]
@@ -62,24 +62,24 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let path = tmp.path().join("nheengatu").join("config.toml");
         let cfg = load_config_from(&path);
-        assert!(cfg.groq_api_key.is_none());
+        assert!(cfg.openrouter_api_key.is_none());
     }
 
     #[test]
     fn save_and_load_roundtrip() {
         let tmp = TempDir::new().unwrap();
         let path = tmp.path().join("nheengatu").join("config.toml");
-        let cfg = Config { groq_api_key: Some("gsk_test123".to_string()) };
+        let cfg = Config { openrouter_api_key: Some("sk-or-test123".to_string()) };
         save_config_to(&cfg, &path).unwrap();
         let loaded = load_config_from(&path);
-        assert_eq!(loaded.groq_api_key.as_deref(), Some("gsk_test123"));
+        assert_eq!(loaded.openrouter_api_key.as_deref(), Some("sk-or-test123"));
     }
 
     #[test]
     fn resolve_key_flag_wins() {
         let tmp = TempDir::new().unwrap();
         let path = tmp.path().join("nheengatu").join("config.toml");
-        let cfg = Config { groq_api_key: Some("from_config".to_string()) };
+        let cfg = Config { openrouter_api_key: Some("from_config".to_string()) };
         save_config_to(&cfg, &path).unwrap();
 
         let key = resolve_api_key(Some("from_flag"), &path);
@@ -90,7 +90,7 @@ mod tests {
     fn resolve_key_falls_back_to_config() {
         let tmp = TempDir::new().unwrap();
         let path = tmp.path().join("nheengatu").join("config.toml");
-        let cfg = Config { groq_api_key: Some("from_config".to_string()) };
+        let cfg = Config { openrouter_api_key: Some("from_config".to_string()) };
         save_config_to(&cfg, &path).unwrap();
 
         let key = resolve_api_key(None, &path);

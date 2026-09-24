@@ -14,7 +14,7 @@ A sample book is included ([Metamorphosis](https://www.gutenberg.org/ebooks/5200
 nheengatu -i examples/metamorphosis.epub
 ```
 
-The interactive guide will walk you through the rest. The story chapters are 3, 4, and 5 (the EPUB also contains a cover page and Project Gutenberg header/footer). Pick chapter 3 to try just the first part and stay within Groq's free tier limits.
+The interactive guide will walk you through the rest. The story chapters are 3, 4, and 5 (the EPUB also contains a cover page and Project Gutenberg header/footer). Pick chapter 3 to try just the first part and keep the API cost negligible.
 
 Here's what chapter I of Kafka's Metamorphosis looks like at three different levels:
 
@@ -77,7 +77,7 @@ Translating "Der Prozess" → Portuguese at A2...
 Done: der-prozess-pt-a2.epub
 ```
 
-On first run it asks for your Groq API key (free at [console.groq.com](https://console.groq.com)) and saves it so you don't need to enter it again.
+On first run it asks for your OpenRouter API key (create one at [openrouter.ai/keys](https://openrouter.ai/keys)) and saves it so you don't need to enter it again.
 
 ### Non-interactive / scripting
 
@@ -95,22 +95,25 @@ nheengatu -i book.epub --source-lang de -t pt -l A2
 -t, --target-lang <LANG>        Target language (name or code: Portuguese, pt)
 -l, --level <LEVEL>             CEFR level: A1 A2 B1 B2 C1 C2
     --source-lang <LANG>        Source language (name or code: German, de)
--b, --backend <BACKEND>         groq or ollama [default: groq]
+-b, --backend <BACKEND>         openrouter or ollama [default: openrouter]
 -m, --model <MODEL>             Model override
     --simplify-backend <B>      Backend for pass 1 (simplify). Defaults to --backend
     --translate-model <MODEL>   Model for pass 2 (translate)
     --chapters <N,N,…>          Only translate these chapters (1-based)
     --two-pass                  Force two-pass at any level
     --max-chunk-words <N>       Words per chunk [default: 2500]
-    --groq-api-key <KEY>        [env: GROQ_API_KEY]
+    --openrouter-api-key <KEY>  [env: OPENROUTER_API_KEY]
     --ollama-url <URL>          [default: http://localhost:11434]
 ```
 
 ## Supported languages
 
-German, English, French, Spanish, Portuguese, Italian, Dutch, Polish, Russian, Japanese, Chinese.
+German, English, French, Spanish, Portuguese, Italian, Dutch, Polish, Russian, Japanese, Chinese, Korean, Arabic.
 
-These are the languages that Ollama models support well. The Groq backend can handle more, but the list reflects what works reliably across both backends.
+The default cloud model is `meta-llama/llama-3.3-70b-instruct`, whose officially
+documented languages cover only part of this list. The rest generally still work
+via pretraining transfer, but quality varies — pass `--model` to try another
+OpenRouter model if a given language disappoints.
 
 ## CEFR levels
 
@@ -130,11 +133,11 @@ These are the languages that Ollama models support well. The Groq backend can ha
 ```rust
 use nheengatu_core::{
     pipeline::{run_pipeline, PipelineConfig},
-    translator::GroqTranslator,
+    translator::OpenRouterTranslator,
 };
 use std::sync::Arc;
 
-let translator = Arc::new(GroqTranslator::new(api_key)?);
+let translator = Arc::new(OpenRouterTranslator::new(api_key)?);
 let config = PipelineConfig {
     target_lang: "pt".into(),
     level: "A2".into(),
