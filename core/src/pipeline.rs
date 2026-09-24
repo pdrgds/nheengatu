@@ -48,6 +48,81 @@ impl Default for PipelineConfig {
     }
 }
 
+const CHAPTER_PREFIXES: [&str; 3] = ["chapter", "kapitel", "part"];
+
+/// Whether `word` is a well-formed Roman numeral.
+///
+/// Membership in the letter set I V X L C D M is not enough: ordinary words
+/// such as "Ill", "Civil" and "Vivid" are spelled entirely from it. A numeral
+/// must also be in canonical form, so the word is parsed to a value and
+/// re-encoded — only an exact round trip counts.
+fn is_roman_numeral(word: &str) -> bool {
+    const VALUES: [(u32, &str); 13] = [
+        (1000, "M"), (900, "CM"), (500, "D"), (400, "CD"),
+        (100, "C"), (90, "XC"), (50, "L"), (40, "XL"),
+        (10, "X"), (9, "IX"), (5, "V"), (4, "IV"), (1, "I"),
+    ];
+
+    let upper = word.to_ascii_uppercase();
+    let digit = |c: char| match c {
+        'I' => Some(1),
+        'V' => Some(5),
+        'X' => Some(10),
+        'L' => Some(50),
+        'C' => Some(100),
+        'D' => Some(500),
+        'M' => Some(1000),
+        _ => None,
+    };
+
+    let digits: Option<Vec<u32>> = upper.chars().map(digit).collect();
+    let digits = match digits {
+        Some(d) if !d.is_empty() => d,
+        _ => return false,
+    };
+
+    let mut total = 0i64;
+    for (i, &value) in digits.iter().enumerate() {
+        match digits.get(i + 1) {
+            Some(&next) if value < next => total -= i64::from(value),
+            _ => total += i64::from(value),
+        }
+    }
+    if total <= 0 {
+        return false;
+    }
+
+    let mut canonical = String::new();
+    let mut remaining = total as u32;
+    for (value, symbol) in VALUES {
+        while remaining >= value {
+            canonical.push_str(symbol);
+            remaining -= value;
+        }
+    }
+
+    canonical == upper
+}
+
+/// Whether a chapter title carries any translatable prose. A title made up
+/// only of numerals, Roman numerals, and/or a generic "chapter" word (e.g.
+/// "I", "3.", "Chapter I", "Kapitel II", "Part 1") has nothing to translate —
+/// sending it to the translator on its own, with no surrounding context,
+/// produces nonsense such as the Roman numeral "I" coming back as the
+/// Portuguese pronoun "Eu". Titles that merely contain a numeral alongside
+/// real words, e.g. "I Remember Mama" or "3 Little Pigs", still return true.
+fn should_translate_title(title: &str) -> bool {
+    title.split_whitespace().any(|word| {
+        let core = word.trim_matches(|c: char| !c.is_alphanumeric());
+        if core.is_empty() {
+            return false;
+        }
+        let is_arabic_numeral = core.chars().all(|c| c.is_ascii_digit());
+        let is_chapter_prefix = CHAPTER_PREFIXES.iter().any(|p| p.eq_ignore_ascii_case(core));
+        !(is_arabic_numeral || is_roman_numeral(core) || is_chapter_prefix)
+    })
+}
+
 /// Run the full translation pipeline: parse → chunk → translate → assemble → write EPUB.
 ///
 /// `simplifier` is used for Pass 1 (simplify in source language).
@@ -137,6 +212,8 @@ pub async fn run_pipeline(
             .unwrap_or_default();
         let translated = if raw_title.is_empty() {
             String::new()
+        } else if !should_translate_title(&raw_title) {
+            raw_title.clone()
         } else {
             translator
                 .translate_chunk(&raw_title, &source_lang, &config.target_lang, "")
@@ -165,6 +242,71 @@ pub async fn run_pipeline(
     epub_writer::write_epub(&epub_title, &config.target_lang, &output_chapters, output)?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod title_translation_tests {
+    use super::*;
+
+    #[test]
+    fn skips_roman_numerals() {
+        for title in ["I", "II", "III", "IV", "V", "IX", "X", "XIV", "xi"] {
+            assert!(!should_translate_title(title), "expected {title:?} to be skipped");
+        }
+    }
+
+    #[test]
+    fn skips_arabic_numerals() {
+        for title in ["1", "2", "42"] {
+            assert!(!should_translate_title(title), "expected {title:?} to be skipped");
+        }
+    }
+
+    #[test]
+    fn skips_chapter_prefix_plus_numeral() {
+        for title in ["Chapter I", "Chapter 3", "Kapitel II", "I.", "3.", "IV -", "Part 1"] {
+            assert!(!should_translate_title(title), "expected {title:?} to be skipped");
+        }
+    }
+
+    #[test]
+    fn skips_blank_titles() {
+        for title in ["", "   ", "\t\n"] {
+            assert!(!should_translate_title(title), "expected {title:?} to be skipped");
+        }
+    }
+
+    #[test]
+    fn translates_prose_titles() {
+        for title in [
+            "Die Verwandlung",
+            "The Trial",
+            "I Remember Mama",
+            "Chapter One: The Beginning",
+            "3 Little Pigs",
+        ] {
+            assert!(should_translate_title(title), "expected {title:?} to be translated");
+        }
+    }
+
+    #[test]
+    fn translates_real_words_spelled_with_roman_numeral_letters() {
+        for title in ["Ill", "Civil", "Mild", "Vivid", "Dim", "Mill"] {
+            assert!(
+                should_translate_title(title),
+                "{} is a real word, not a Roman numeral",
+                title
+            );
+        }
+    }
+
+    #[test]
+    fn bare_roman_numeral_i_is_not_mistaken_for_the_pronoun() {
+        // The exact bug: a standalone "I" chapter heading (Roman numeral "one")
+        // was translated as if it were the English pronoun "I", coming back as
+        // the Portuguese "Eu". It must be passed through untranslated instead.
+        assert!(!should_translate_title("I"));
+    }
 }
 
 #[cfg(test)]

@@ -1,10 +1,11 @@
 #!/bin/bash
-# Two-pass test matrix for nheengatu — all runs via Groq.
+# Two-pass test matrix for nheengatu — all runs via OpenRouter.
 #
 # Combos tested:
-#   70b_70b  — simplify=llama-3.3-70b  translate=llama-3.3-70b
-#   8b_8b    — simplify=llama-3.1-8b   translate=llama-3.1-8b
-#   70b_8b   — simplify=llama-3.3-70b  translate=llama-3.1-8b
+#   Edit MODELS below to compare any OpenRouter models head to head.
+#   70b_70b    — simplify=llama-3.3-70b  translate=llama-3.3-70b
+#   scout_scout — simplify=llama-4-scout  translate=llama-4-scout
+#   70b_scout  — simplify=llama-3.3-70b  translate=llama-4-scout
 #
 # Usage:
 #   ./tools/run_tests.sh <input.epub> <chapter> <target_lang>
@@ -25,8 +26,8 @@ if [ -f .env ]; then
     set -a; source .env; set +a
 fi
 
-if [ -z "$GROQ_API_KEY" ]; then
-    echo "Error: GROQ_API_KEY not set. Add it to .env or export it."
+if [ -z "$OPENROUTER_API_KEY" ]; then
+    echo "Error: OPENROUTER_API_KEY not set. Add it to .env or export it."
     exit 1
 fi
 
@@ -34,14 +35,14 @@ LEVELS=("A1" "A2")
 
 # "label simplify_model translate_model"
 COMBOS=(
-    "70b_70b llama-3.3-70b-versatile  llama-3.3-70b-versatile"
-    "8b_8b   llama-3.1-8b-instant     llama-3.1-8b-instant"
-    "70b_8b  llama-3.3-70b-versatile  llama-3.1-8b-instant"
+    "70b_70b meta-llama/llama-3.3-70b-instruct  meta-llama/llama-3.3-70b-instruct"
+    "scout_scout meta-llama/llama-4-scout meta-llama/llama-4-scout"
+    "70b_scout meta-llama/llama-3.3-70b-instruct meta-llama/llama-4-scout"
 )
 
 GRAND_TOTAL=$(( ${#LEVELS[@]} * ${#COMBOS[@]} ))
 
-echo "=== nheengatu test matrix (two-pass, all Groq) ==="
+echo "=== nheengatu test matrix (two-pass, all OpenRouter) ==="
 echo "Input  : $INPUT  (chapter $CHAPTER, lang $LANG)"
 echo "Levels : ${LEVELS[*]}"
 echo ""
@@ -66,8 +67,8 @@ run_one() {
     set +e
     output=$(
         $BIN \
-            -b groq -m "$sm" --translate-model "$tm" \
-            --simplify-backend groq \
+            -b openrouter -m "$sm" --translate-model "$tm" \
+            --simplify-backend openrouter \
             --prompt detailed \
             --chapters "$CHAPTER" \
             -i "$INPUT" -o "$out" \
@@ -87,7 +88,7 @@ run_one() {
     fi
 }
 
-# Run all combos sequentially to respect Groq rate limits
+# Run all combos sequentially to respect OpenRouter rate limits
 for level in "${LEVELS[@]}"; do
     for combo in "${COMBOS[@]}"; do
         read -r lbl sm tm <<< "$combo"

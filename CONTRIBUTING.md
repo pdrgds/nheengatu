@@ -9,7 +9,7 @@ This repository contains two public crates:
 - **`nheengatu-core`** — the library. Contributions welcome to:
   - `epub_parser` — EPUB parsing
   - `chunker` — text chunking logic
-  - `translator` — the `Translator` trait and built-in backends (Groq, Ollama)
+  - `translator` — the `Translator` trait and built-in backends (OpenRouter, Ollama)
   - `pipeline` — the translation pipeline (`run_pipeline`, `PipelineConfig`)
 - **`nheengatu-cli`** — the command-line tool built on top of `nheengatu-core`
 - **New translator backends** — any LLM or translation API that implements the `Translator` trait
