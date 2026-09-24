@@ -32,6 +32,14 @@ pub fn all_languages_except(exclude_code: &str) -> Vec<Language> {
         .collect()
 }
 
+pub fn supported_list() -> String {
+    LANGUAGES
+        .iter()
+        .map(|l| format!("{} ({})", l.name, l.code))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
 pub fn resolve_language(input: &str) -> Option<Language> {
     let lower = input.to_lowercase();
     LANGUAGES
@@ -65,6 +73,19 @@ mod tests {
     #[test]
     fn all_languages_returns_13() {
         assert_eq!(all_languages().len(), 13);
+    }
+
+    #[test]
+    fn supported_list_names_every_language_with_its_code() {
+        let list = supported_list();
+        assert_eq!(list.matches(", ").count(), all_languages().len() - 1);
+        for lang in all_languages() {
+            assert!(
+                list.contains(&format!("{} ({})", lang.name, lang.code)),
+                "{} missing from supported list",
+                lang.name
+            );
+        }
     }
 
     #[test]

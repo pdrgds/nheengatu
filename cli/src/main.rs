@@ -80,7 +80,7 @@ async fn main() -> anyhow::Result<()> {
     let source_lang = match cli.source_lang {
         Some(ref s) => {
             let lang = languages::resolve_language(s)
-                .ok_or_else(|| anyhow::anyhow!("Unknown source language: '{}'. Use a supported language name or code.", s))?;
+                .ok_or_else(|| anyhow::anyhow!("Unknown source language: '{}'. Supported: {}", s, languages::supported_list()))?;
             lang.code.to_string()
         }
         None => {
@@ -93,7 +93,7 @@ async fn main() -> anyhow::Result<()> {
     let target_lang = match cli.target_lang {
         Some(ref s) => {
             let lang = languages::resolve_language(s)
-                .ok_or_else(|| anyhow::anyhow!("Unknown target language: '{}'. Use a supported language name or code.", s))?;
+                .ok_or_else(|| anyhow::anyhow!("Unknown target language: '{}'. Supported: {}", s, languages::supported_list()))?;
             lang.code.to_string()
         }
         None => {
