@@ -37,6 +37,19 @@ pub trait Translator: Send + Sync {
     }
 }
 
+/// The language name to put in a prompt for a language code.
+///
+/// Plain "pt" means Brazilian Portuguese. Asked for "pt", Claude models answer
+/// in European Portuguese or a mix of both, which is no use to a learner who
+/// needs one consistent variety. Other codes pass through unchanged.
+pub fn prompt_language(code: &str) -> String {
+    match code.to_ascii_lowercase().replace('_', "-").as_str() {
+        "pt" | "pt-br" => "Brazilian Portuguese".to_string(),
+        "pt-pt" => "European Portuguese".to_string(),
+        _ => code.to_string(),
+    }
+}
+
 pub fn build_prompt(
     text: &str,
     source_lang: &str,
@@ -45,6 +58,8 @@ pub fn build_prompt(
     prev_context: Option<&str>,
     simple_prompt: bool,
 ) -> String {
+    let source_lang = prompt_language(source_lang);
+    let target_lang = prompt_language(target_lang);
     let context_block = prev_context
         .map(|ctx| {
             format!(
@@ -131,6 +146,7 @@ pub fn build_simplify_prompt(
     level: &str,
     simple_prompt: bool,
 ) -> String {
+    let lang = prompt_language(lang);
     if simple_prompt {
         return format!(
             "Rewrite the following text in {lang}. \
@@ -727,6 +743,28 @@ mod tests {
         assert!(
             p.contains("en") && p.contains("de") && p.contains("A2") && p.contains("Hello world.")
         );
+    }
+
+    #[test]
+    fn plain_pt_asks_for_brazilian_portuguese() {
+        for code in ["pt", "pt-BR", "pt_br", "PT"] {
+            let p = build_prompt("Hello.", "en", code, "A2", None, false);
+            assert!(p.contains("to Brazilian Portuguese"), "{code}: {p}");
+        }
+        let p = build_simplify_prompt("Olá.", "pt", "A2", false);
+        assert!(p.contains("Keep the text in Brazilian Portuguese"), "{p}");
+    }
+
+    #[test]
+    fn european_portuguese_only_when_asked_for() {
+        assert_eq!(prompt_language("pt-PT"), "European Portuguese");
+    }
+
+    #[test]
+    fn other_language_codes_pass_through() {
+        for code in ["en", "en-US", "de", "zh", "ko", "ar"] {
+            assert_eq!(prompt_language(code), code);
+        }
     }
 
     #[test]
