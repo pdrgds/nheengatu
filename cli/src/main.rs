@@ -5,7 +5,9 @@ mod progress;
 
 use clap::Parser;
 use dotenvy::dotenv;
+use config::Provider;
 use nheengatu_core::{
+    anthropic::AnthropicTranslator,
     pipeline::{run_pipeline, PipelineConfig},
     translator::{OllamaTranslator, OpenRouterTranslator, Translator},
 };
@@ -30,6 +32,8 @@ struct Cli {
     /// Backend for pass 1 (simplify). Defaults to --backend if not set.
     #[arg(long)]
     simplify_backend: Option<String>,
+    #[arg(long, env = "ANTHROPIC_API_KEY", hide_env_values = true)]
+    anthropic_api_key: Option<String>,
     #[arg(long, env = "OPENROUTER_API_KEY", hide_env_values = true)]
     openrouter_api_key: Option<String>,
     #[arg(long, default_value = "http://localhost:11434")]
@@ -115,7 +119,7 @@ async fn main() -> anyhow::Result<()> {
     };
 
     // --- Standard vs Advanced ---
-    let mut backend = cli.backend.clone().unwrap_or_else(|| "openrouter".to_string());
+    let mut backend = cli.backend.clone().unwrap_or_else(|| "anthropic".to_string());
     let simplify_backend = cli.simplify_backend.clone();
     let mut model = cli.model.clone();
     let mut translate_model = cli.translate_model.clone();
@@ -132,7 +136,12 @@ async fn main() -> anyhow::Result<()> {
 
     if !has_advanced_flags && !all_required_provided && interactive::ask_advanced()? {
         backend = interactive::ask_backend()?;
-        model = interactive::ask_model("Model for simplify pass?", "meta-llama/llama-3.3-70b-instruct")?;
+        let default_model = match backend.as_str() {
+            "anthropic" => nheengatu_core::anthropic::DEFAULT_MODEL,
+            "openrouter" => nheengatu_core::translator::DEFAULT_MODEL,
+            _ => "llama3.1:8b",
+        };
+        model = interactive::ask_model("Model for simplify pass?", default_model)?;
         translate_model = interactive::ask_model("Model for translate pass?", "same as above")?;
         force_two_pass = interactive::ask_two_pass()?;
         max_chunk_words = interactive::ask_max_chunk_words()?;
@@ -140,14 +149,22 @@ async fn main() -> anyhow::Result<()> {
 
     let simplify_backend_str = simplify_backend.unwrap_or_else(|| backend.clone());
 
-    // --- Resolve API key ---
+    // --- Resolve API keys ---
     let config_path = config::config_path();
-    let needs_openrouter = backend == "openrouter" || simplify_backend_str == "openrouter";
-    let openrouter_api_key = if needs_openrouter {
-        match config::resolve_api_key(cli.openrouter_api_key.as_deref(), &config_path) {
-            Some(key) => key,
-            None => interactive::ask_api_key()?,
+    let uses = |name: &str| backend == name || simplify_backend_str == name;
+    let resolve_key = |flag: Option<&str>, provider: Provider| -> anyhow::Result<String> {
+        match config::resolve_api_key(flag, provider, &config_path) {
+            Some(key) => Ok(key),
+            None => interactive::ask_api_key(provider),
         }
+    };
+    let anthropic_api_key = if uses("anthropic") {
+        resolve_key(cli.anthropic_api_key.as_deref(), Provider::Anthropic)?
+    } else {
+        String::new()
+    };
+    let openrouter_api_key = if uses("openrouter") {
+        resolve_key(cli.openrouter_api_key.as_deref(), Provider::OpenRouter)?
     } else {
         String::new()
     };
@@ -166,6 +183,14 @@ async fn main() -> anyhow::Result<()> {
 
     // --- Build translators ---
     let simplifier: Box<dyn Translator> = match simplify_backend_str.as_str() {
+        "anthropic" => {
+            let mut s = AnthropicTranslator::new(anthropic_api_key.clone())?;
+            s.simple_prompt = simple_prompt;
+            if let Some(m) = model.clone() {
+                s = s.with_model(m);
+            }
+            Box::new(s)
+        }
         "openrouter" => {
             let mut s = OpenRouterTranslator::new(openrouter_api_key.clone())?;
             s.simple_prompt = simple_prompt;
@@ -179,10 +204,18 @@ async fn main() -> anyhow::Result<()> {
             s.simple_prompt = simple_prompt;
             Box::new(s)
         }
-        other => anyhow::bail!("Unknown simplify backend: {}. Use 'openrouter' or 'ollama'.", other),
+        other => anyhow::bail!("Unknown simplify backend: {}. Use 'anthropic', 'openrouter' or 'ollama'.", other),
     };
 
     let translator: Box<dyn Translator> = match backend.as_str() {
+        "anthropic" => {
+            let mut t = AnthropicTranslator::new(anthropic_api_key)?;
+            t.simple_prompt = simple_prompt;
+            if let Some(m) = translate_model.or(model) {
+                t = t.with_model(m);
+            }
+            Box::new(t)
+        }
         "openrouter" => {
             let mut t = OpenRouterTranslator::new(openrouter_api_key)?;
             let m = translate_model.or(model);
@@ -196,7 +229,7 @@ async fn main() -> anyhow::Result<()> {
             let t = OllamaTranslator::new(Some(cli.ollama_url), m);
             Box::new(t)
         }
-        other => anyhow::bail!("Unknown backend: {}. Use 'openrouter' or 'ollama'.", other),
+        other => anyhow::bail!("Unknown backend: {}. Use 'anthropic', 'openrouter' or 'ollama'.", other),
     };
 
     // --- Auto-generate output path if needed ---

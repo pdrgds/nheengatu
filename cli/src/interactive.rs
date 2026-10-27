@@ -97,13 +97,13 @@ pub fn ask_advanced() -> anyhow::Result<bool> {
 
 /// Advanced: ask for backend.
 pub fn ask_backend() -> anyhow::Result<String> {
-    let items = &["OpenRouter (cloud)", "Ollama (local)"];
+    let items = &["Claude (Anthropic, cloud)", "OpenRouter (cloud)", "Ollama (local)"];
     let selection = Select::new()
         .with_prompt("Backend")
         .items(items)
         .default(0)
         .interact()?;
-    Ok(if selection == 0 { "openrouter" } else { "ollama" }.to_string())
+    Ok(["anthropic", "openrouter", "ollama"][selection].to_string())
 }
 
 /// Advanced: ask for model name with a default.
@@ -137,9 +137,9 @@ pub fn ask_max_chunk_words() -> anyhow::Result<usize> {
     Ok(input.trim().parse()?)
 }
 
-/// Prompt for an OpenRouter API key and optionally save it.
-pub fn ask_api_key() -> anyhow::Result<String> {
-    println!("No OpenRouter API key found. Create one at https://openrouter.ai/keys");
+/// Prompt for a provider's API key and optionally save it.
+pub fn ask_api_key(provider: config::Provider) -> anyhow::Result<String> {
+    println!("No {} API key found. Create one at {}", provider.name(), provider.keys_url());
     let key: String = Input::new()
         .with_prompt("Paste your key")
         .interact_text()?;
@@ -154,7 +154,7 @@ pub fn ask_api_key() -> anyhow::Result<String> {
     if save {
         let path = config::config_path();
         let mut cfg = config::load_config_from(&path);
-        cfg.openrouter_api_key = Some(key.clone());
+        cfg.set_api_key(provider, key.clone());
         config::save_config_to(&cfg, &path)?;
         println!("Saved to {}", path.display());
     }
