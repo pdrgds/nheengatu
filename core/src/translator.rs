@@ -12,6 +12,8 @@ pub enum TranslateError {
     MissingApiKey,
     #[error("rate limited by the API")]
     RateLimited { retry_after: Option<u64> },
+    #[error("the model declined the request ({0})")]
+    Refused(String),
 }
 
 #[async_trait]
