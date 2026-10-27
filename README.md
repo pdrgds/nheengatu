@@ -41,6 +41,8 @@ For **A1 and A2**, a two-pass pipeline runs automatically:
 - **Pass 1 — Simplify** in the source language (vocabulary and structure only)
 - **Pass 2 — Translate** the simplified text to the target language
 
+Every level keeps every sentence of the book, in order. Lower levels split a long sentence into several short ones instead of leaving content out, so an A2 edition is the whole story told simply, not a summary of it.
+
 Separating these steps produces significantly better results at low levels — in testing, two-pass A2 output showed 15–25% higher coverage of standard vocabulary lists compared to single-pass. It also prevents the language leakage that occurs when a model tries to simplify and translate simultaneously.
 
 For **B1 and above**, a single pass is used. Forcing two passes at B1 hurts quality: Pass 1 over-simplifies sentence structure and Pass 2 cannot recover the natural flow.
@@ -77,7 +79,7 @@ Translating "Der Prozess" → Portuguese at A2...
 Done: der-prozess-pt-a2.epub
 ```
 
-On first run it asks for your OpenRouter API key (create one at [openrouter.ai/keys](https://openrouter.ai/keys)) and saves it so you don't need to enter it again.
+On first run it asks for your Anthropic API key (create one at [platform.claude.com/settings/keys](https://platform.claude.com/settings/keys)) and saves it so you don't need to enter it again.
 
 ### Non-interactive / scripting
 
@@ -95,13 +97,14 @@ nheengatu -i book.epub --source-lang de -t pt -l A2
 -t, --target-lang <LANG>        Target language (name or code: Portuguese, pt)
 -l, --level <LEVEL>             CEFR level: A1 A2 B1 B2 C1 C2
     --source-lang <LANG>        Source language (name or code: German, de)
--b, --backend <BACKEND>         openrouter or ollama [default: openrouter]
+-b, --backend <BACKEND>         anthropic, openrouter or ollama [default: anthropic]
 -m, --model <MODEL>             Model override
     --simplify-backend <B>      Backend for pass 1 (simplify). Defaults to --backend
     --translate-model <MODEL>   Model for pass 2 (translate)
     --chapters <N,N,…>          Only translate these chapters (1-based)
     --two-pass                  Force two-pass at any level
     --max-chunk-words <N>       Words per chunk [default: 2500]
+    --anthropic-api-key <KEY>   [env: ANTHROPIC_API_KEY]
     --openrouter-api-key <KEY>  [env: OPENROUTER_API_KEY]
     --ollama-url <URL>          [default: http://localhost:11434]
 ```
@@ -110,10 +113,11 @@ nheengatu -i book.epub --source-lang de -t pt -l A2
 
 German, English, French, Spanish, Portuguese, Italian, Dutch, Polish, Russian, Japanese, Chinese, Korean, Arabic.
 
-The default cloud model is `meta-llama/llama-3.3-70b-instruct`, whose officially
-documented languages cover only part of this list. The rest generally still work
-via pretraining transfer, but quality varies — pass `--model` to try another
-OpenRouter model if a given language disappoints.
+Portuguese means Brazilian Portuguese.
+
+The default model is Claude Haiku 5.5 (`claude-haiku-5-5`) through the Anthropic
+API. Pass `-b openrouter` to use Llama 3.3 70B through OpenRouter instead, or
+`--model` to choose another model on either backend.
 
 ## CEFR levels
 
@@ -133,11 +137,11 @@ OpenRouter model if a given language disappoints.
 ```rust
 use nheengatu_core::{
     pipeline::{run_pipeline, PipelineConfig},
-    translator::OpenRouterTranslator,
+    anthropic::AnthropicTranslator,
 };
 use std::sync::Arc;
 
-let translator = Arc::new(OpenRouterTranslator::new(api_key)?);
+let translator = Arc::new(AnthropicTranslator::new(api_key)?);
 let config = PipelineConfig {
     target_lang: "pt".into(),
     level: "A2".into(),

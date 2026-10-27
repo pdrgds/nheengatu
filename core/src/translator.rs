@@ -12,6 +12,8 @@ pub enum TranslateError {
     MissingApiKey,
     #[error("rate limited by the API")]
     RateLimited { retry_after: Option<u64> },
+    #[error("the model declined the request ({0})")]
+    Refused(String),
 }
 
 #[async_trait]
@@ -35,6 +37,19 @@ pub trait Translator: Send + Sync {
     }
 }
 
+/// The language name to put in a prompt for a language code.
+///
+/// Plain "pt" means Brazilian Portuguese. Asked for "pt", Claude models answer
+/// in European Portuguese or a mix of both, which is no use to a learner who
+/// needs one consistent variety. Other codes pass through unchanged.
+pub fn prompt_language(code: &str) -> String {
+    match code.to_ascii_lowercase().replace('_', "-").as_str() {
+        "pt" | "pt-br" => "Brazilian Portuguese".to_string(),
+        "pt-pt" => "European Portuguese".to_string(),
+        _ => code.to_string(),
+    }
+}
+
 pub fn build_prompt(
     text: &str,
     source_lang: &str,
@@ -43,6 +58,8 @@ pub fn build_prompt(
     prev_context: Option<&str>,
     simple_prompt: bool,
 ) -> String {
+    let source_lang = prompt_language(source_lang);
+    let target_lang = prompt_language(target_lang);
     let context_block = prev_context
         .map(|ctx| {
             format!(
@@ -70,8 +87,8 @@ pub fn build_prompt(
             "- Only present tense and simple past (he went, she said).\n",
             "- No subordinate clauses, no relative clauses, no complex grammar.\n",
             "- Replace every difficult word with the simplest possible word.\n",
-            "- If a scene is complex, reduce it to the main action only.\n",
-            "- It is OK to lose detail. Clarity is more important than completeness.\n",
+            "- Keep every sentence of the original, in the same order. Do not summarize, merge, or skip any part of the text.\n",
+            "- If a sentence is long or complex, split it into several very short sentences instead of leaving content out.\n",
             "\n",
             "Style example (apply this to the target language):\n",
             "WRONG: \"Despite his miserable living conditions, Harry maintained a resilient spirit.\"\n",
@@ -86,7 +103,8 @@ pub fn build_prompt(
             "- Short, clear sentences (under 15 words). Two ideas per sentence at most.\n",
             "- Use everyday vocabulary. Replace rare or formal words with common ones.\n",
             "- Simple past and present tense. Basic connectors only: and, but, because, so, then.\n",
-            "- Keep the full story but simplify how it is told. You can drop small details.\n",
+            "- Keep every sentence of the original, in the same order. Do not summarize, merge, or skip any part of the text.\n",
+            "- If a sentence is long, split it into several short sentences instead of leaving content out.\n",
             "\n",
             "Style example (apply this to the target language):\n",
             "WRONG: \"He resided with his relatives, who harboured a profound aversion towards him.\"\n",
@@ -100,7 +118,8 @@ pub fn build_prompt(
             "Rules:\n",
             "- Use clear, natural language. Sentences can be moderate length.\n",
             "- Avoid rare words, idioms, and overly complex structures.\n",
-            "- Keep the full story and most details. Simplify only where needed.\n",
+            "- Keep every sentence of the original, in the same order. Do not summarize, merge, or skip any part of the text.\n",
+            "- Simplify only where needed. Split a long sentence into shorter ones instead of leaving content out.\n",
         ),
         "B2" => concat!(
             "You are writing for an upper-intermediate learner.\n",
@@ -108,8 +127,12 @@ pub fn build_prompt(
             "- Preserve the original style and narrative closely.\n",
             "- Simplify only unusually complex sentences and rare vocabulary.\n",
             "- Replace C1/C2 words with B2-level equivalents where possible.\n",
+            "- Keep every sentence of the original, in the same order. Do not summarize, merge, or skip any part of the text.\n",
         ),
-        _ => "Translate faithfully, preserving the original style and vocabulary.\n",
+        _ => concat!(
+            "Translate faithfully, preserving the original style and vocabulary.\n",
+            "Keep every sentence of the original, in the same order. Do not summarize, merge, or skip any part of the text.\n",
+        ),
     };
 
     format!(
@@ -129,6 +152,7 @@ pub fn build_simplify_prompt(
     level: &str,
     simple_prompt: bool,
 ) -> String {
+    let lang = prompt_language(lang);
     if simple_prompt {
         return format!(
             "Rewrite the following text in {lang}. \
@@ -145,8 +169,8 @@ pub fn build_simplify_prompt(
             "- Only present tense and simple past (he went, she said).\n",
             "- No subordinate clauses, no relative clauses, no complex grammar.\n",
             "- Replace every difficult word with the simplest possible word.\n",
-            "- If a scene is complex, reduce it to the main action only.\n",
-            "- It is OK to lose detail. Clarity is more important than completeness.\n",
+            "- Keep every sentence of the original, in the same order. Do not summarize, merge, or skip any part of the text.\n",
+            "- If a sentence is long or complex, split it into several very short sentences instead of leaving content out.\n",
             "\n",
             "Style example (apply this to the target language):\n",
             "WRONG: \"Despite his miserable living conditions, Harry maintained a resilient spirit.\"\n",
@@ -161,7 +185,8 @@ pub fn build_simplify_prompt(
             "- Short, clear sentences (under 15 words). Two ideas per sentence at most.\n",
             "- Use everyday vocabulary. Replace rare or formal words with common ones.\n",
             "- Simple past and present tense. Basic connectors only: and, but, because, so, then.\n",
-            "- Keep the full story but simplify how it is told. You can drop small details.\n",
+            "- Keep every sentence of the original, in the same order. Do not summarize, merge, or skip any part of the text.\n",
+            "- If a sentence is long, split it into several short sentences instead of leaving content out.\n",
             "\n",
             "Style example (apply this to the target language):\n",
             "WRONG: \"He resided with his relatives, who harboured a profound aversion towards him.\"\n",
@@ -175,7 +200,8 @@ pub fn build_simplify_prompt(
             "Rules:\n",
             "- Use clear, natural language. Sentences can be moderate length.\n",
             "- Avoid rare words, idioms, and overly complex structures.\n",
-            "- Keep the full story and most details. Simplify only where needed.\n",
+            "- Keep every sentence of the original, in the same order. Do not summarize, merge, or skip any part of the text.\n",
+            "- Simplify only where needed. Split a long sentence into shorter ones instead of leaving content out.\n",
         ),
         "B2" => concat!(
             "You are writing for an upper-intermediate learner.\n",
@@ -183,8 +209,12 @@ pub fn build_simplify_prompt(
             "- Preserve the original style and narrative closely.\n",
             "- Simplify only unusually complex sentences and rare vocabulary.\n",
             "- Replace C1/C2 words with B2-level equivalents where possible.\n",
+            "- Keep every sentence of the original, in the same order. Do not summarize, merge, or skip any part of the text.\n",
         ),
-        _ => "Rewrite faithfully, preserving the original style and vocabulary.\n",
+        _ => concat!(
+            "Rewrite faithfully, preserving the original style and vocabulary.\n",
+            "Keep every sentence of the original, in the same order. Do not summarize, merge, or skip any part of the text.\n",
+        ),
     };
 
     format!(
@@ -725,6 +755,43 @@ mod tests {
         assert!(
             p.contains("en") && p.contains("de") && p.contains("A2") && p.contains("Hello world.")
         );
+    }
+
+    #[test]
+    fn plain_pt_asks_for_brazilian_portuguese() {
+        for code in ["pt", "pt-BR", "pt_br", "PT"] {
+            let p = build_prompt("Hello.", "en", code, "A2", None, false);
+            assert!(p.contains("to Brazilian Portuguese"), "{code}: {p}");
+        }
+        let p = build_simplify_prompt("Olá.", "pt", "A2", false);
+        assert!(p.contains("Keep the text in Brazilian Portuguese"), "{p}");
+    }
+
+    #[test]
+    fn every_level_keeps_every_sentence() {
+        for level in ["A1", "A2", "B1", "B2", "C1", "C2", ""] {
+            for p in [
+                build_prompt("Text.", "en", "pt", level, None, false),
+                build_simplify_prompt("Text.", "en", level, false),
+            ] {
+                assert!(p.contains("Keep every sentence of the original"), "{level}: {p}");
+                for permission in ["lose detail", "drop small details", "main action only"] {
+                    assert!(!p.contains(permission), "{level} still allows dropping content: {p}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn european_portuguese_only_when_asked_for() {
+        assert_eq!(prompt_language("pt-PT"), "European Portuguese");
+    }
+
+    #[test]
+    fn other_language_codes_pass_through() {
+        for code in ["en", "en-US", "de", "zh", "ko", "ar"] {
+            assert_eq!(prompt_language(code), code);
+        }
     }
 
     #[test]
